@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/yesint/molar_vis.git",
+  "commit": "11e9883eb4d490085a6401ce01398b7992af147f",
+  "sha256": {
+    "molar_vis.js": "ca4ec062f0cab6c43b1f5845d6fd339ffb6b2fc25b23e57bb7f53b475341d94b",
+    "molar_vis_bg.wasm": "62a0c01bec01fab6ccdedc332be8bd7eed7e8a151973da76807e743b05712b76",
+    "molar_vis.d.ts": "b989c5108cb629d25969da4c5c12777b8e265b184e76a291679e1fad346a609a",
+    "LICENSE": "c2a7ff448e62f0e7f47bfeb1c057bbc01870ef68d702417ff4df0dcbd49c68fe"
+  },
+  "wasm_opt": false
+}

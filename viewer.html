@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="referrer" content="no-referrer">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Molecule preview</title>
+  <link rel="stylesheet" href="./viewer.css">
+  <script type="module" src="./viewer.js"></script>
+</head>
+<body>
+  <div id="viewport"><canvas id="molecule" aria-label="Molecular structure"></canvas></div>
+  <p id="status" role="status">Loading…</p>
+  <nav id="navigation" aria-label="Molecules" hidden>
+    <button id="previous" aria-label="Previous molecule" disabled>Previous</button>
+    <span id="position" aria-live="polite"></span>
+    <button id="next" aria-label="Next molecule" disabled>Next</button>
+  </nav>
+</body>
+</html>

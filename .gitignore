@@ -1,0 +1,8 @@
+_site/
+__pycache__/
+.env
+.env.*
+*.pem
+*.key
+credentials*.json
+service-account*.json

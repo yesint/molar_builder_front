@@ -1,0 +1,32 @@
+<!doctype html><meta charset="utf-8"><title>Viewer error checks</title>
+<script type="module">
+const assert = (value, message) => { if (!value) throw new Error(message); };
+const wait = async check => {
+  for (let i = 0; i < 400; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 25)); }
+  throw new Error("Timed out waiting for viewer message");
+};
+const frame = document.createElement("iframe"), messages = [];
+window.addEventListener("message", event => {
+  if (event.origin === location.origin && event.source === frame.contentWindow) messages.push(event.data);
+});
+frame.src = "../viewer.html"; document.body.append(frame);
+let report;
+try {
+  await wait(() => messages.some(message => message.type === "ready"));
+  const bytes = new TextEncoder().encode("invalid structure").buffer;
+  frame.contentWindow.postMessage({type:"file",mode:"assembly",name:"system.unsupported",bytes,species:[]}, location.origin, [bytes]);
+  await wait(() => messages.some(message => message.type === "unavailable"));
+  const failure = messages.find(message => message.type === "unavailable");
+  assert(failure.message.startsWith("Cannot display the assembled system: "), "The first failure message must contain the caught exception");
+  assert(!failure.message.endsWith("undefined"), "String exceptions must retain their text");
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert(messages.filter(message => ["invalid", "unavailable"].includes(message.type)).length === 1, "One failure must produce one detailed message");
+  const win = frame.contentWindow;
+  win.dispatchEvent(new win.ErrorEvent("error", {error: new win.Error("Viewer runtime failure")}));
+  await wait(() => messages.some(message => message.message === "Viewer runtime failure"));
+  win.dispatchEvent(new win.PromiseRejectionEvent("unhandledrejection", {promise: win.Promise.resolve(), reason: "Viewer promise failure"}));
+  await wait(() => messages.some(message => message.message === "Viewer promise failure"));
+  report = "PASS: viewer parse, runtime and promise errors retain their details without duplicate generic failures";
+} catch (cause) { report = `FAIL: ${cause.stack || cause}`; }
+await fetch("/test-result", {method:"POST",body:report});
+</script>

@@ -1,0 +1,309 @@
+<!doctype html><meta charset="utf-8"><title>Membrane browser checks</title>
+<iframe id="app" src="../membrane.html" style="width:1100px;height:900px"></iframe>
+<script type="module">
+import { normalizeComposition, lipidCounts, monolayerAreas, areaMismatch, balanceLipid, membraneCellSize } from "../membrane-composition.js";
+const assert = (value, message) => { if (!value) throw new Error(message); };
+const rejects = action => { try { action(); } catch { return; } throw new Error("Expected rejection"); };
+const wait = async check => {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    if (check()) return;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  throw new Error("Timed out waiting for the interface");
+};
+let report;
+try {
+  const metadata = await (await fetch("../membrane-assets/catalog.json")).json();
+  assert(membraneCellSize(6, 1, {xy_diameter_nm:6,minimum_cell_size_nm:7.6}) === 9.3, "Margin raises an undersized cell");
+  assert(membraneCellSize(11, 1, {xy_diameter_nm:6,minimum_cell_size_nm:7.6}) === 11, "A larger entered cell wins");
+  const areaCatalogue = [{id:"A",area_nm2:1},{id:"B",area_nm2:0.5}];
+  assert(areaMismatch({upper:105,lower:100}) === 5, "Mismatch uses the smaller area and a strict 5% threshold");
+  const unequal = [{id:"A",upper:20,lower:10},{id:"B",upper:10,lower:10}];
+  assert(JSON.stringify(monolayerAreas(unequal, areaCatalogue)) === JSON.stringify({upper:25,lower:15}), "Areas sum count times lipid area");
+  assert(JSON.stringify(balanceLipid(unequal, areaCatalogue,"A")) === JSON.stringify({id:"A",side:"upper",delta:-10}), "Exact balance removes only the chosen species");
+  assert(JSON.stringify(balanceLipid(unequal, areaCatalogue,"B")) === JSON.stringify({id:"B",side:"lower",delta:20}), "Insufficient removable lipids select addition to the smaller leaflet");
+  const tied = [{id:"A",upper:5,lower:3},{id:"B",upper:1,lower:0}];
+  assert(balanceLipid(tied, areaCatalogue,"A").delta === -2, "Equal residuals use the smaller whole-lipid change");
+  assert(balanceLipid([{id:"A",upper:2,lower:2}],areaCatalogue,"A") === null, "Balanced areas need no adjustment");
+  assert(balanceLipid(unequal, areaCatalogue, "A", {upper:0,lower:10}) === null, "Protein area can offset the lipid area difference");
+  assert(JSON.stringify(balanceLipid(unequal, areaCatalogue, "A", {upper:0,lower:20})) === JSON.stringify({id:"A",side:"lower",delta:-10}), "Balancing accounts for protein area when choosing the leaflet");
+  const sizingCatalogue = [{id:"A",area_nm2:0.6},{id:"B",area_nm2:0.4}];
+  const sizingRows = [{id:"A",upper:75,lower:75},{id:"B",upper:25,lower:25}];
+  const sizingLength = Math.sqrt(55 / (Math.sqrt(3) / 2));
+  // Independent reference: Rust areas::count_tests::counts_fill_a_fixed_cell.
+  assert(JSON.stringify(lipidCounts(sizingRows,sizingCatalogue,sizingLength,true,{upper:0,lower:5.5})) === JSON.stringify([{id:"A",upper:75,lower:68},{id:"B",upper:25,lower:22}]), "Per-leaflet counts use cell area minus the corresponding protein area");
+  assert(JSON.stringify(lipidCounts(sizingRows,sizingCatalogue,sizingLength,false,{upper:0,lower:5.5})) === JSON.stringify([{id:"A",upper:71,lower:71},{id:"B",upper:24,lower:24}]), "Membrane counts use the combined free area");
+  for (const proteinAreas of [{upper:-1,lower:0},{upper:NaN,lower:0},{upper:60,lower:0}]) {
+    rejects(() => lipidCounts(sizingRows,sizingCatalogue,sizingLength,true,proteinAreas));
+  }
+  // Reference counts from real bilayer-builder SIZE output, not the JS calculation.
+  const mixture = [{id:"POPC",upper:75,lower:75},{id:"CHL1",upper:25,lower:25}];
+  assert(JSON.stringify(lipidCounts(mixture, metadata.lipids, 6, true)) ===
+    JSON.stringify([{id:"POPC",upper:38,lower:38},{id:"CHL1",upper:13,lower:13}]), "6 nm mixture matches builder counts");
+  assert(JSON.stringify(lipidCounts(mixture, metadata.lipids, 4, false)) ===
+    JSON.stringify([{id:"POPC",upper:17,lower:17},{id:"CHL1",upper:6,lower:5}]), "Overall counts match builder rounding across leaflets");
+  const thirds = normalizeComposition([1, 2, 3].map(id => ({id, upper: 1, lower: 1})), true);
+  assert(Math.abs(thirds.reduce((sum, row) => sum + row.upper, 0) - 100) < 1e-9, "Rounded thirds must total 100");
+  const total = normalizeComposition([{id: "A", upper: 6, lower: 2}, {id: "B", upper: 1, lower: 1}], false);
+  assert(total[0].upper === 60 && total[0].lower === 20 && total[1].lower === 10, "Overall normalization must preserve leaflet asymmetry");
+  for (const bad of [-1, NaN, Infinity, "", null]) rejects(() => normalizeComposition([{id:"A",upper:bad,lower:1}],true));
+  rejects(() => normalizeComposition([], true));
+  rejects(() => normalizeComposition([{id:"A",upper:0,lower:1}], false));
+  const huge = normalizeComposition([{id:"A",upper:1e308,lower:1e308},{id:"B",upper:1e308,lower:1e308}],true);
+  assert(huge[0].upper === 50, "Finite large values must normalize without overflow");
+  const frame = document.getElementById("app");
+  await wait(() => frame.contentDocument?.getElementById("add-lipid")?.disabled === false);
+  const win = frame.contentWindow;
+  const doc = frame.contentDocument;
+  const $ = id => doc.getElementById(id);
+  let finalViewerMessage, viewerAttempts = 0;
+  new win.MutationObserver(() => {
+    const viewer = $("assembly-viewer").querySelector("iframe"); if (!viewer) return;
+    viewer.src = "about:blank";
+    viewer.contentWindow.postMessage = data => {
+      finalViewerMessage = data;
+      const reply = ++viewerAttempts === 1 ? {type:"unavailable", message:"Graphics context lost"} : {type:"rendered"};
+      setTimeout(() => win.dispatchEvent(new win.MessageEvent("message", {origin:win.location.origin,source:viewer.contentWindow,data:reply})), 0);
+    };
+    setTimeout(() => win.dispatchEvent(new win.MessageEvent("message", {origin:win.location.origin,source:viewer.contentWindow,data:{type:"ready"}})), 0);
+  }).observe($("assembly-viewer"), {childList:true});
+  const input = (id, value) => { $(id).value = value; $(id).dispatchEvent(new win.Event("input", {bubbles:true})); };
+  assert($("load-options").hidden && $("load-actions").hidden && $("load-viewer").hidden, "Only Load is visible before a file is available");
+  for (const page of ["proteins", "ligands"]) {
+    const link = doc.querySelector('[data-page="' + page + '"]');
+    assert(!link.hasAttribute("href") && link.getAttribute("aria-disabled") === "true", "Empty component page is disabled");
+    win.location.hash = "#" + page; await wait(() => win.location.hash === "#load");
+  }
+  win.location.hash = "#membrane"; await wait(() => !$("page-membrane").hidden);
+  assert(!doc.querySelector("#lipid-rows tr") && $("build").disabled && $("membrane-ready").hidden, "No membrane is selected by default");
+  assert($("composition-error").hidden, "The empty initial membrane has no validation error");
+  assert($("build").textContent === "Continue", "Membrane configuration uses Continue");
+  $("add-lipid").click();
+  input("lipid-search", "POPC");
+  doc.querySelector('[data-lipid="POPC"]').click();
+  input("POPC-inner", "100"); input("POPC-outer", "100");
+  assert(!$("check") && !$("check-message"), "The Check step is removed");
+  assert(!doc.querySelector(".app-heading a") && !doc.querySelector(".app-heading p"), "The header has no shortcut or subtitle");
+  assert(!$("build").hidden && $("per-leaflet").checked, "Build is visible and per-leaflet normalization is the default");
+  assert(doc.querySelector("#lipid-rows tr").children[1].querySelector("input").id === "POPC-inner", "Inner precedes Outer");
+  assert(doc.querySelector("[data-page]").dataset.page === "load", "Load is first in the project tree");
+  assert(!$("species-count") && $("membrane-ready").hidden, "A configured membrane waits for Build before showing a checkmark");
+  assert($("add-lipid").textContent.trim() === "+ Add lipids" && $("picker-heading").textContent === "Add lipids", "The button and chooser use Add lipids");
+  assert(!$("protein-area-row") && $("protein-area-note").textContent.includes("subtracted"), "Protein area is explained without an unknown numeric row");
+  assert($("POPC-outer-count").textContent === "(46)", "Initial count is shown beside its percentage");
+  assert(!doc.querySelector(".percentage-unit"), "Inputs have no percent suffix");
+  assert($("inner-area").textContent === "31.418" && $("outer-area").textContent === "31.418", "Monolayer areas appear below totals");
+  assert($("balance-controls").hidden, "Equal areas hide balancing controls");
+  assert(!$("inner-input-total") && !$("outer-input-total"), "Only computed totals are shown");
+  assert($("balance-controls").closest("tr") === $("inner-area").closest("tr"), "Balancing controls are in the Area row");
+  const assertAreaAlignment = () => {
+    for (const side of ["inner", "outer"]) {
+      const area = $(side + "-area").closest("td").getBoundingClientRect();
+      const total = $(side + "-total").closest("td").getBoundingClientRect();
+      assert(Math.abs(area.left - total.left) < 1 && Math.abs(area.right - total.right) < 1, `${side} area uses the same table column as its total`);
+    }
+  };
+  assertAreaAlignment();
+  assert($("inner-pie").dataset.total === "46" && $("outer-pie").dataset.total === "46", "Charts show computed counts");
+  assert($("inner-pie").querySelector('circle[data-lipid="POPC"]').dataset.count === "46", "A single species fills the pie");
+  assert($("inner-legend").textContent.includes("POPC46"), "The legend gives each species count");
+  assert($("inner-pie").getBoundingClientRect().top < $("outer-pie").getBoundingClientRect().top, "Inner chart is above Outer");
+  input("cell-size", "4");
+  assert($("POPC-outer-count").textContent === "(20)", "Counts update with the box size");
+  assert($("outer-pie").dataset.total === "20", "Charts update with box size");
+  input("cell-size", "6");
+  $("add-lipid").click();
+  assert($("lipid-picker").open, "Picker opens as a dialog");
+  assert($("preview-content").hidden, "Opening the chooser does not show a picture");
+  assert(!doc.getElementById("preview-source"), "The source label is removed");
+  assert(doc.querySelectorAll(".picker-layout > *").length === 4, "The chooser shows family, subfamily, molecules, and structure");
+  function active(field) {
+    return doc.querySelector(`[data-${field}][aria-pressed="true"]`)?.dataset[field];
+  }
+  assert(active("family") === "Phospholipids" && active("subfamily") === "PC" && doc.querySelector('[data-lipid="POPC"]'), "Phospholipids → PC contains POPC");
+  const familyNames = [...doc.querySelectorAll("[data-family]")].map(button => button.dataset.family);
+  for (const family of familyNames) {
+    doc.querySelector(`[data-family="${family}"]`).click();
+    const names = [...doc.querySelectorAll("[data-subfamily]")].map(button => button.dataset.subfamily.toLowerCase());
+    if (names.includes("other")) assert(names.pop() === "other", `Other appears last in ${family}`);
+    assert(names.every((name, i) => i === 0 || names[i - 1] <= name), `Subfamilies of ${family} appear alphabetically`);
+  }
+  doc.querySelector('[data-family="Phospholipids"]').click();
+  doc.querySelector('[data-subfamily="Other"]').click();
+  const otherPhospholipids = [...doc.querySelectorAll("#picker-lipids [data-lipid]")].map(button => button.dataset.lipid);
+  assert(otherPhospholipids.join(",") === "BMGP,DPPGK", "Single-molecule phospholipid subfamilies share Other");
+  input("lipid-search", "Lysyl-PG");
+  assert(active("subfamily") === "Other" && doc.querySelector('#picker-lipids [data-lipid="DPPGK"]'), "The chemical subfamily name still finds DPPGK under Other");
+  input("lipid-search", "");
+  doc.querySelector('[data-subfamily="PE"]').click();
+  assert(doc.querySelector('[data-lipid="POPE"]') && !doc.querySelector('[data-lipid="DOPC"]'), "Headgroup selection updates the lipid column");
+  doc.querySelector('[data-family="Detergents"]').click();
+  doc.querySelector('[data-subfamily="Glycerol"]').click();
+  const glycerol = [...doc.querySelectorAll("#picker-lipids [data-lipid]")].map(button => button.dataset.lipid);
+  assert(glycerol.join(",") === "GMS1,GMS2,MLN1,MLN2", "Detergents → Glycerol lists its four molecules");
+  doc.querySelector('[data-family="Glycerolipids"]').click();
+  doc.querySelector('[data-subfamily="DAG"]').click();
+  assert(doc.querySelectorAll("#picker-lipids [data-lipid]").length === 21, "All 21 DAGs are selectable under Glycerolipids");
+  const dag = doc.querySelector('#picker-lipids [data-lipid="POGL"]');
+  dag.dispatchEvent(new win.MouseEvent("mouseenter"));
+  await $("preview-image").decode();
+  assert($("preview-image").src.endsWith("/pogl.svg") && dag.querySelector(".lipid-tail").textContent === "16:0 / 18:1", "POGL shows its local structure and both tails");
+  input("lipid-search", "POPC");
+  assert(active("family") === "Phospholipids" && active("subfamily") === "PC", "Searching for POPC selects its family and subfamily");
+  input("lipid-search", "A2UDM");
+  assert(active("family") === "Detergents" && active("subfamily") === "Maltosides", "Searching for a maltoside selects its detergent branch");
+  const detergent = doc.querySelector('[data-lipid="A2UDM"]');
+  detergent.dispatchEvent(new win.MouseEvent("mouseenter"));
+  await $("preview-image").decode();
+  assert($("preview-image").src.endsWith("/a2udm.svg") && $("preview-tails").hidden && !detergent.querySelector(".lipid-tail"), "Detergents without tail metadata show their structure and molecule name alone");
+  detergent.click();
+  assert($("A2UDM-outer"), "A newly catalogued species can be added");
+  doc.querySelector('[aria-label="Remove A2UDM"]').click();
+  $("add-lipid").click();
+  input("lipid-search", "no-such-lipid");
+  assert(!$("no-lipids").hidden, "Empty search results are explained");
+  input("lipid-search", "DOPC");
+  assert($("preview-content").hidden, "Search does not show a picture before hover or keyboard focus");
+  const dopc = doc.querySelector('[data-lipid="DOPC"]');
+  dopc.dispatchEvent(new win.MouseEvent("mouseenter"));
+  assert(!$("preview-content").hidden && $("preview-image").alt.includes("DOPC"), "Hover previews the selected structure");
+  await wait(() => $("preview-image").complete);
+  assert($("preview-image").naturalWidth > 0, "Chemical structure image loads locally");
+  dopc.dispatchEvent(new win.MouseEvent("mouseleave"));
+  assert($("preview-content").hidden, "Leaving a lipid clears the picture");
+  dopc.focus();
+  assert(!$("preview-content").hidden, "Keyboard focus can also reveal the structure");
+  $("lipid-search").focus();
+  assert($("preview-content").hidden, "Leaving keyboard focus clears the picture");
+  dopc.click();
+  assert(!$("lipid-picker").open && $("DOPC-outer"), "Choosing a species adds it and closes the dialog");
+  $("add-lipid").click();
+  assert(doc.querySelector('[data-lipid="DOPC"]').getAttribute("aria-disabled") === "true", "Duplicate species cannot be added");
+  $("close-picker").click();
+  input("POPC-outer", "3"); input("DOPC-outer", "1");
+  input("POPC-inner", "1"); input("DOPC-inner", "1");
+  assert($("POPC-outer").value === "3" && $("DOPC-inner").value === "1", "User-entered values stay unchanged");
+  assert($("POPC-outer-normalized").textContent === "75%" && $("DOPC-inner-normalized").textContent === "50%", "Each leaflet normalizes live beside the input");
+  assert($("outer-pie").querySelectorAll("path").length === 2, "Mixed leaflets have one sector per nonzero species");
+  const chartCount = (side, id) => $(side + "-pie").querySelector(`[data-lipid="${id}"]`)?.dataset.count;
+  assert(`(${chartCount("outer", "POPC")})` === $("POPC-outer-count").textContent, "Pie sectors use integer counts, not entered percentages");
+  assert($("inner-pie").querySelector('[data-lipid="DOPC"]').getAttribute("fill") === $("outer-pie").querySelector('[data-lipid="DOPC"]').getAttribute("fill"), "Species colors match across charts");
+  await wait(() => !$("build").disabled);
+  input("POPC-outer", "");
+  assert($("build").disabled && !$("composition-error").hidden, "Blank values disable computation immediately");
+  assert($("membrane-ready").hidden, "Invalid input clears the setup checkmark");
+  assert($("POPC-outer-count").textContent === "(—)", "Invalid composition clears stale counts");
+  assert($("outer-pie").dataset.total === "0" && !$("outer-pie").querySelector("[data-lipid]"), "Invalid input clears stale pie data");
+  input("POPC-outer", "-2");
+  assert($("build").disabled, "Negative values disable computation immediately");
+  input("POPC-outer", "6"); input("DOPC-outer", "1");
+  input("POPC-inner", "2"); input("DOPC-inner", "1");
+  $("per-membrane").click();
+  assert($("per-membrane").checked && !$("per-leaflet").checked, "Normalization radios are mutually exclusive");
+  assert($("combined-total").textContent.includes("100%") && $("outer-total").textContent === "70%", "Combined mode preserves relative leaflet amounts");
+  win.location.hash = "solvent";
+  await wait(() => !$("page-solvent").hidden);
+  win.location.hash = "membrane";
+  await wait(() => !$("page-membrane").hidden);
+  assert($("POPC-outer").value === "6" && $("POPC-inner").value === "2", "Navigation preserves the original inputs");
+  assert($("POPC-outer-normalized").textContent === "60%" && $("POPC-inner-normalized").textContent === "20%", "Membrane mode shows separate normalized values");
+  assert(!$("balance-controls").hidden, "Area differences above 5% show balancing controls");
+  assert($("membrane-ready").hidden, "A membrane needing balance is not marked as set up");
+  const innerArea = parseFloat($("inner-area").textContent);
+  const outerArea = parseFloat($("outer-area").textContent);
+  assert(outerArea > innerArea && /\(\+\d+(\.\d+)?%\)/.test($("outer-area").textContent) && !$("inner-area").textContent.includes("%"), "Only the larger area shows its relative excess");
+  assertAreaAlignment();
+  assert($("balance-controls").getBoundingClientRect().right < $("inner-area").getBoundingClientRect().left, "Balancing controls do not overlap the Inner area");
+  $("balancing-lipid").value = "POPC";
+  $("balance").click();
+  assert($("balance-controls").hidden, "Balancing brings monolayer areas within 5%");
+  assert($("membrane-ready").hidden, "Balancing does not mark the membrane as built");
+  const correction = $("POPC-outer-adjustment").textContent;
+  assert(correction.startsWith("-") && !$("POPC-outer-adjustment").hidden, "The signed change appears before the balancing lipid count");
+  assert($("POPC-inner-adjustment").hidden && $("DOPC-outer-adjustment").hidden, "Only one species in one leaflet is adjusted");
+  assert(`(${chartCount("outer", "POPC")})` === $("POPC-outer-count").textContent, "The pie includes the balancing adjustment");
+  assert($("POPC-outer").value === "6" && $("POPC-inner").value === "2", "Balancing preserves user input");
+  await wait(() => !$("build").disabled);
+  let finish;
+  let body, receipts = 0, structureReads = 0;
+  win.fetch = async (url, options) => {
+    if (url.includes("/build-progress/")) return win.Response.json([]);
+    if (url.endsWith("/received")) {
+      if (await (await fetch($("assembly-archive").href)).text() !== "final ZIP") return new win.Response(null, {status:409});
+      ++receipts;
+      return new win.Response(null, {status:204});
+    }
+    if (!options) { structureReads++; return new win.Response("data_final_system"); }
+    body = JSON.parse(options.body);
+    return new Promise(resolve => { finish = resolve; });
+  };
+  const charts = doc.querySelector(".leaflet-charts"), chartHTML = charts.innerHTML;
+  $("build").click();
+  assert(!body && !$("composition-controls").disabled && !$("membrane-ready").hidden, "Continue saves composition without construction");
+  await wait(() => !$("page-solvent").hidden);
+  $("continue-solvent").click(); await wait(() => !$("page-submit").hidden);
+  assert($("submit-summary").textContent.includes("Build membrane") && !$("submit-summary").textContent.includes("Prepare protein"), "Membrane-only plan contains only applicable stages");
+  $("assemble-system").click(); await wait(() => !!body);
+  assert($("composition-controls").disabled && $("composition-controls").hidden && !$("computation").hidden, "Assembly constructs the deferred membrane");
+  assert(body.normalization === "total" && body.lipid_weights[0].upper === 6 && body.lipid_weights[0].lower === 2, "Batch receives original leaflet inputs");
+  assert(body.balancing_lipid === "POPC" && !("balance" in body), "Batch recomputes the saved balancing choice");
+  assert($("POPC-outer").value === "6" && $("POPC-inner").value === "2", "Submission leaves the inputs unchanged");
+  finish(new win.Response(JSON.stringify({error:"Test build failure"}), {status:422}));
+  await wait(() => !$("assembly-options").disabled);
+  assert($("assembly-error").textContent.includes("Test build failure") && !$("assemble-system").disabled, "Build failure preserves settings and permits retry from Assembly");
+  body = null; $("assemble-system").click(); await wait(() => !!body);
+  const result = new win.FormData();
+  result.append("archive", new win.Blob([new Uint8Array([80,75,5,6])]), "membrane.zip");
+  result.append("structure", new win.Blob(["data_membrane"]), "membrane.cif");
+  finish(new win.Response(result, {headers:{"X-Membrane-ID":"built"}}));
+  await wait(() => body.membrane_id === "built");
+  assert($("save-membrane").href.startsWith("blob:") && !$("built-membrane").hidden, "Membrane result is available during the final Assembly task");
+  assert(charts.innerHTML === chartHTML, "Deferred construction preserves computed charts");
+  assert(body.neutralize === true && $("assembly-ready").hidden, "Final assembly consumes the membrane and ion settings");
+  finish(new win.Response(new win.Blob(["final ZIP"]),{headers:{"X-Assembly-ID":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}));
+  await wait(() => !$("retry-viewer").hidden && !$("assembly-options").disabled);
+  const download = $("assembly-archive").href;
+  assert($("assembly-error").textContent.includes("Graphics context lost") && !$("assembly-download").hidden && !$("retry-viewer").hidden, "The failed preview retains the archive and can be retried in place");
+  $("retry-viewer").click();
+  await wait(() => $("assembly-viewer").dataset.state === "rendered");
+  assert(receipts === 1 && structureReads === 1, "The browser acknowledges the stored ZIP and retries the viewer with local coordinates");
+  assert(viewerAttempts === 2 && $("assembly-archive").href === download && $("assembly-error").hidden, "Retry renders the saved assembly without another build");
+  assert(!$("assembly-ready").hidden && $("assemble-system").hidden, "Successful final grompp completes Assembly and hides Build");
+  assert($("assembly-download") instanceof win.HTMLButtonElement && !$("assembly-unsaved-warning").hidden, "Save ZIP is prominent and shows the unsaved warning");
+  const leaving = () => new win.Event("beforeunload", {cancelable:true});
+  assert(!win.dispatchEvent(leaving()), "The tab warns before leaving an unsaved build");
+  let savedFilename;
+  $("assembly-archive").addEventListener("click", event => {
+    event.preventDefault();
+    savedFilename = event.currentTarget.download;
+  }, {once:true});
+  $("assembly-download").click();
+  assert(savedFilename === "assembly.zip" && $("assembly-unsaved-warning").hidden && win.dispatchEvent(leaving()), "Saving the ZIP dismisses the notice and the leave-page warning");
+  assert(finalViewerMessage.mode === "assembly" && finalViewerMessage.species.length === 2, "The final viewer receives the assembled system and lipid species colors");
+  win.location.hash = "#membrane"; await wait(() => !$("page-membrane").hidden);
+  assert(charts.getBoundingClientRect().height > 0 && $("membrane-viewer").querySelector("iframe"), "Charts and viewer remain available after the batch");
+  input("salt-concentration", "0.2");
+  assert($("assembly-ready").hidden && $("assembly-download").textContent === "Save previous ZIP", "Ion edits invalidate the current result and preserve its download");
+  win.location.hash = "#membrane"; await wait(() => !$("page-membrane").hidden);
+  $("edit-membrane").click();
+  assert(!$("composition-controls").hidden && $("built-membrane").hidden && !$("membrane-viewer").children.length, "Edit restores inputs and releases the viewer");
+  assert($("POPC-outer").value === "6" && $("POPC-outer-adjustment").textContent === correction, "Edit preserves raw input and balancing correction");
+  assert(charts.innerHTML === chartHTML, "Edit preserves chart counts and colors");
+  input("cell-size", "7");
+  assert($("POPC-outer-adjustment").hidden && !$("balance-controls").hidden, "Box edits clear the previous correction and recalculate areas");
+  assert(!$("build").hidden && !$("build").disabled && $("computation").hidden, "Changing the cell recomputes immediately and clears the old result");
+  doc.querySelector('[aria-label="Remove DOPC"]').click();
+  assert(!$("DOPC-outer"), "Species can be removed");
+  for (const lipid of metadata.lipids) {
+    const image = new Image(); image.src = `../${lipid.image}`;
+    await image.decode();
+  }
+  const reopened = document.createElement("iframe");
+  reopened.src = "../membrane.html#submit";
+  document.body.append(reopened);
+  await wait(() => reopened.contentDocument?.getElementById("add-lipid")?.disabled === false);
+  assert(reopened.contentDocument.getElementById("assembly-download").hidden, "A new page starts without the previous tab's ZIP");
+  report = `PASS: membrane composition, species search and selection, ${metadata.lipids.length} local structure images, navigation, computation, failure/retry, and downloads`;
+} catch (error) { report = `FAIL: ${error.stack || error}`; }
+await fetch("/test-result", {method:"POST",body:report});
+</script>
