@@ -55,6 +55,18 @@ try {
   await wait(() => choices("separate.sdf"));
   $("partition-system").click(); await wait(() => !$("load-ready").hidden);
   assert(win.location.hash === "#ligands" && $("prepared-ligands").textContent.includes("separate.sdf | mol 2"), "Separate SDF records work without a protein upload");
+  await wait(() => !$("page-ligands").hidden && !$("ligand-viewer").hidden);
+  for (const width of [320, 900, 1250]) {
+    frame.style.width = width + "px";
+    await wait(() => win.innerWidth === width);
+    const controls = $("page-ligands").querySelector(".protein-controls").getBoundingClientRect();
+    const viewer = $("ligand-viewer").getBoundingClientRect();
+    const fields = [$("ligand-resname-search"), ...$("prepared-ligands").querySelectorAll(".ligand-source-row > *")];
+    assert(fields.every(el => el.getBoundingClientRect().right <= controls.right + 1),
+      `The ligand search and file origins fit the controls at ${width}px`);
+    assert(width === 1250 ? viewer.left >= controls.right && viewer.width >= 320 : viewer.top >= controls.bottom,
+      `The ligand viewer has room beside or below the controls at ${width}px`);
+  }
   win.location.hash = "#load";
   assert(boxes("separate.sdf").length === 3 && boxes("separate.sdf")[0].checked, "All and both SDF records are shown");
   boxes("separate.sdf")[0].click();

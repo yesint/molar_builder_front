@@ -439,7 +439,7 @@ export function setLigands(items) {
       return row;
     }
     function button(ligand) {
-      const control = document.createElement("button"); control.type = "button"; control.className = "secondary";
+      const control = document.createElement("button"); control.type = "button"; control.className = "secondary compact";
       control.textContent = ligand.label || residueLabel(ligand.residue);
       control.onclick = () => showLigand(ligand).catch(e => ligandError(e.message));
       return withOrigin(control, ligand, control.textContent);
