@@ -267,6 +267,11 @@ try {
   assert(viewerAttempts === 2 && $("assembly-archive").href === download && $("assembly-error").hidden, "Retry renders the saved assembly without another build");
   assert(!$("assembly-ready").hidden && $("assemble-system").hidden, "Successful minimization and validation complete Assembly and hides Build");
   assert($("assembly-download") instanceof win.HTMLButtonElement && !$("assembly-unsaved-warning").hidden, "Save ZIP is prominent and shows the unsaved warning");
+  const warning = $("assembly-unsaved-warning");
+  assert(warning.nextElementSibling === $("assembly-download") &&
+    $("submission-fee").getBoundingClientRect().bottom <= warning.getBoundingClientRect().top &&
+    warning.getBoundingClientRect().bottom <= $("assembly-download").getBoundingClientRect().top,
+    "The unsaved warning appears below the beta terms and directly above Save ZIP");
   const leaving = () => new win.Event("beforeunload", {cancelable:true});
   assert(!win.dispatchEvent(leaving()), "The tab warns before leaving an unsaved build");
   let savedFilename;

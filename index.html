@@ -223,9 +223,16 @@
               data-help="Review your choices and start the build. When it finishes, select Save ZIP to download your files before closing the tab.">?</button>
           </div>
           <ol id="submit-summary" aria-label="Planned build steps"></ol>
-          <p id="assembly-unsaved-warning" class="notice" role="status" hidden>If you reload or close this tab before saving the ZIP, you will lose the result.</p>
           <div id="submission-fee" class="notice"></div>
-          <div class="actions"><button id="assemble-system" type="button" disabled>Submit</button><button id="cancel-checkout" class="secondary" type="button" hidden>Cancel checkout</button><button id="assembly-download" type="button" aria-describedby="assembly-unsaved-warning" hidden>Save ZIP</button><a id="assembly-archive" download="assembly.zip" hidden></a><a id="force-field-download" href="/api/assembly/force-field.zip">Download CHARMM36 / CGenFF force field</a><button id="retry-viewer" type="button" hidden>Retry viewer</button></div>
+          <div class="actions">
+            <button id="assemble-system" type="button" disabled>Submit</button>
+            <button id="cancel-checkout" class="secondary" type="button" hidden>Cancel checkout</button>
+            <p id="assembly-unsaved-warning" class="notice" role="status" hidden>If you reload or close this tab before saving the ZIP, you will lose the result.</p>
+            <button id="assembly-download" type="button" aria-describedby="assembly-unsaved-warning" hidden>Save ZIP</button>
+            <a id="assembly-archive" download="assembly.zip" hidden></a>
+            <a id="force-field-download" href="/api/assembly/force-field.zip">Download CHARMM36 / CGenFF force field</a>
+            <button id="retry-viewer" type="button" hidden>Retry viewer</button>
+          </div>
           <p id="archive-notice" role="status" hidden></p>
           <p id="assembly-status" class="sr-only" role="status" hidden></p><ol id="assembly-log" class="build-log" tabindex="0" aria-label="Build stages" aria-live="polite" hidden></ol><p id="build-total" hidden>Total build time: <time id="build-duration"></time></p><progress id="assembly-progress" hidden></progress>
           <p id="assembly-error" class="error" role="alert" hidden></p>

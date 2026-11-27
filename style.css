@@ -29,4 +29,5 @@ button:disabled { color: #65706b; background: #e5e9e6; border-color: #d5dcd9; cu
 code { font-size: .9em; }
 footer { margin-top: 28px; }
 .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 22px; }
+#assembly-unsaved-warning { flex-basis: 100%; box-sizing: border-box; margin: 0; }
 @media (max-width: 480px) { main { padding: 24px 16px; } section { padding: 20px 16px; } .counts { gap: 16px 26px; } }
