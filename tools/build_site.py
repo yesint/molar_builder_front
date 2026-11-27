@@ -6,11 +6,11 @@ import sys
 import json
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ["index.html", "style.css", "app.js", "api.js", "config.js", "payment.js",
+ASSETS = ["sdf.html", "style.css", "app.js", "api.js", "config.js", "payment.js",
           "preview.js", "viewer.html", "viewer.js", "viewer.css",
           "vendor/molar_vis/molar_vis.js", "vendor/molar_vis/molar_vis_bg.wasm",
           "vendor/molar_vis/LICENSE", "vendor/molar_vis/source.json"]
-ASSETS += ["builder-api.js", "builder-checkout.js", "membrane.html", "membrane.css", "membrane.js", "membrane-composition.js", "protein.js", "glycans.js", "load.js", "assembly.js",
+ASSETS += ["builder-api.js", "builder-checkout.js", "index.html", "membrane.html", "membrane.css", "membrane.js", "membrane-composition.js", "protein.js", "glycans.js", "load.js", "assembly.js",
            "membrane-assets/catalog.json"]
 ASSETS += [lipid["image"] for lipid in json.loads((ROOT / "membrane-assets/catalog.json").read_text())["lipids"]]
 

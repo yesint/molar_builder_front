@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="referrer" content="no-referrer">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Generate GROMACS topologies and coordinates from an SDF file.">
+  <title>SDF to GROMACS</title>
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>SDF to GROMACS</h1>
+      <details>
+        <summary>About this service</summary>
+        <ul>
+          <li>This service produces GROMACS topologies for small molecules, compatible with CHARMM36/CGenFF. This is an independent clean-room reimplementation of <a href="https://cgenff.com/" target="_blank" rel="noopener noreferrer">CGenFF</a> based only on published papers and publicly available artifacts.</li>
+          <li>You may use the generated topologies for any purpose, including commercial use.</li>
+          <li>The processing price is $1 per 1,000 atoms. The fee is used to maintain the compute server.</li>
+          <li>No registration is needed:
+            <ol>
+              <li>Upload an SDF file with one or several molecules.</li>
+              <li>Pay the processing fee via PayPal.</li>
+              <li>Wait until processing is finished. Do not close the tab, or your results (and money) will be lost!</li>
+              <li>Download the results.</li>
+            </ol>
+          </li>
+        </ul>
+      </details>
+    </header>
+
+    <p id="connection" class="notice" role="status">Connecting…</p>
+    <noscript><p class="notice">Enable JavaScript to submit a file.</p></noscript>
+
+    <div class="workspace">
+    <div class="submission">
+    <nav aria-label="Submission progress">
+      <ol class="wizard-steps">
+        <li data-step="file" aria-current="step"><span>1</span> Select file</li>
+        <li data-step="compute"><span>2</span> Compute</li>
+        <li data-step="save"><span>3</span> Save</li>
+      </ol>
+    </nav>
+    <p id="job-status" role="status" aria-live="polite" hidden></p>
+
+    <section id="step-file" aria-labelledby="upload-heading">
+      <h2 id="upload-heading" class="sr-only" tabindex="-1">Select an SDF file</h2>
+      <p id="file-help">Use an SDF with explicit hydrogens (up to 10 MiB).</p>
+      <input id="sdf" type="file" accept=".sdf,.sd,chemical/x-mdl-sdfile" aria-labelledby="upload-heading" aria-describedby="file-help file-error">
+      <p id="file-error" class="error" role="alert" hidden></p>
+      <div id="summary" hidden aria-live="polite">
+        <dl class="counts">
+          <div><dt>Molecules</dt><dd id="molecules">—</dd></div>
+          <div><dt>Total atoms</dt><dd id="atoms">—</dd></div>
+        </dl>
+      </div>
+      <div class="actions">
+        <button id="submit" disabled>Submit</button>
+      </div>
+    </section>
+
+    <section id="step-compute" aria-labelledby="compute-heading" hidden>
+      <h2 id="compute-heading" class="sr-only" tabindex="-1">Compute</h2>
+      <p id="compute-note">Keep this tab open.</p>
+      <progress id="compute-progress" aria-label="Assigning parameters"></progress>
+      <p id="molecule-progress" class="small" role="status" hidden></p>
+      <div class="actions">
+        <button id="retry" hidden>Run again</button>
+        <button id="back-after-error" class="secondary" hidden>Choose another file</button>
+      </div>
+    </section>
+
+    <section id="step-save" aria-labelledby="download-heading" hidden>
+      <h2 id="download-heading" class="sr-only" tabindex="-1">Save</h2>
+      <p id="unsaved-warning" class="notice">If you close this tab before saving the result will be lost</p>
+      <a id="download" class="button" hidden>Save ZIP</a>
+      <button id="reset" hidden>Start new submission</button>
+    </section>
+
+    </div>
+    <aside id="preview" aria-label="Molecule preview" hidden></aside>
+    </div>
+
+    <footer hidden>
+      <p><a id="force-field-download" href="#" download="charmm_params.itp">Download CHARMM36/CGenFF parameters</a></p>
+      <p>Include <code>charmm_params.itp</code> before your molecule topologies.</p>
+    </footer>
+  </main>
+
+</body>
+</html>

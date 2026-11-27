@@ -6,4 +6,4 @@ You can mutate proteins, add post-translational modifications, parameterize liga
 
 A nominal fee of USD 1.00 per build deters spam and helps cover server costs.
 
-[Open MolAR Builder](https://yesint.github.io/molar_builder_front/membrane.html)
+[Open MolAR Builder](https://yesint.github.io/molar_builder_front/)

@@ -1,5 +1,5 @@
 <!doctype html><meta charset="utf-8"><title>Membrane browser checks</title>
-<iframe id="app" src="../membrane.html" style="width:1100px;height:900px"></iframe>
+<iframe id="app" src="../" style="width:1100px;height:900px"></iframe>
 <script type="module">
 import { normalizeComposition, lipidCounts, monolayerAreas, areaMismatch, balanceLipid, membraneCellSize } from "../membrane-composition.js";
 const assert = (value, message) => { if (!value) throw new Error(message); };
@@ -299,7 +299,7 @@ try {
     await image.decode();
   }
   const reopened = document.createElement("iframe");
-  reopened.src = "../membrane.html#submit";
+  reopened.src = "../#submit";
   document.body.append(reopened);
   await wait(() => reopened.contentDocument?.getElementById("add-lipid")?.disabled === false);
   assert(reopened.contentDocument.getElementById("assembly-download").hidden, "A new page starts without the previous tab's ZIP");
