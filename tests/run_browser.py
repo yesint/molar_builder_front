@@ -32,7 +32,7 @@ def main():
             if args.page in ("payment", "membrane", "protein", "glycans") and self.path == "/api/membrane/health":
                 health = {"ready": True, "compute_timeout_seconds": 600}
                 if args.page == "payment":
-                    health.update(payment_mode="paypal-sandbox", amount={"currency_code": "USD", "value": "1.00"})
+                    health.update(payment_mode="paypal-sandbox", amount={"currency_code": "USD", "value": "0.50"})
                 data = json.dumps(health).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")

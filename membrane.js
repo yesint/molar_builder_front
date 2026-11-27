@@ -439,6 +439,9 @@ $("balance").addEventListener("click", () => {
   refreshComposition();
 });
 
+const betaTerms = $("public-beta-terms");
+$("submission-fee").replaceChildren(...Array.from(betaTerms.children, node => node.cloneNode(true)));
+
 async function connect() {
   ready = false;
   try {
@@ -452,10 +455,7 @@ async function connect() {
       const amount = health.amount || health.sandbox_amount;
       const price = `${amount.currency_code} ${amount.value}`;
       $("assemble-system").textContent = `Pay ${price} with PayPal and build`;
-      if (paypalMode === "paypal-live") {
-        $("submission-price").textContent = price;
-        $("submission-fee").hidden = false;
-      }
+      for (const label of document.querySelectorAll("[data-build-price]")) label.textContent = price;
     }
     ready = health.ready === true;
     if (Number.isFinite(health.compute_timeout_seconds)) timeoutSeconds = health.compute_timeout_seconds;
@@ -503,6 +503,7 @@ async function prepareBatch({ stage, task, request, assembly }) {
     try {
       await checkoutBuild(() => paymentPlan(assembly), paypalMode, {
         signal: controller.signal,
+        quotedPrice: betaTerms.querySelector("[data-build-price]").textContent,
         onConfirming() { cancel.textContent = "Stop waiting"; stage("Confirming PayPal payment"); },
       });
     } finally {

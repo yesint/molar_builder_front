@@ -57,7 +57,7 @@ export function receiveCheckoutReturn(notice) {
   setTimeout(() => channel.close(), 10000);
 }
 
-export async function checkoutBuild(makePlan, mode = "paypal-sandbox", {signal, onConfirming} = {}) {
+export async function checkoutBuild(makePlan, mode = "paypal-sandbox", {signal, onConfirming, quotedPrice} = {}) {
   // The popup must open during the original Submit click.
   const popup = openPaymentWindow();
   let channel, wake;
@@ -86,6 +86,13 @@ export async function checkoutBuild(makePlan, mode = "paypal-sandbox", {signal, 
     const order = await paymentRequest("/checkout", plan, wait.signal);
     wait.signal.throwIfAborted();
     if (order.paid) return;
+    const price = `${order.amount?.currency_code} ${order.amount?.value}`;
+    if (quotedPrice && price !== quotedPrice) {
+      if (!order.amount?.value) throw new Error("The checkout price could not be verified.");
+      if (!window.confirm(`The price for this checkout is ${price}. Continue to PayPal at this price?`)) {
+        throw new CheckoutDismissed("Checkout cancelled.");
+      }
+    }
     const url = new URL(order.url);
     const paypalOrigin = mode === "paypal-live" ? "https://www.paypal.com" : "https://www.sandbox.paypal.com";
     if (url.origin !== paypalOrigin) throw new Error("Unexpected PayPal checkout address.");

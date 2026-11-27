@@ -226,7 +226,7 @@
           </div>
           <ol id="submit-summary" aria-label="Planned build steps"></ol>
           <p id="assembly-unsaved-warning" class="notice" role="status" hidden>If you reload or close this tab before saving the ZIP, you will lose the result.</p>
-          <p id="submission-fee" class="notice" hidden>MolAR builder is in public beta. Each submission costs <strong id="submission-price">USD 1.00</strong>. The fee helps cover server costs and discourages automated submissions. You need a PayPal account to pay. By confirming payment, you agree to pay this fee for the submitted system. The fee is non-refundable.</p>
+          <div id="submission-fee" class="notice"></div>
           <div class="actions"><button id="assemble-system" type="button" disabled>Submit</button><button id="cancel-checkout" class="secondary" type="button" hidden>Cancel checkout</button><button id="assembly-download" type="button" aria-describedby="assembly-unsaved-warning" hidden>Save ZIP</button><a id="assembly-archive" download="assembly.zip" hidden></a><a id="force-field-download" href="/api/assembly/force-field.zip">Download CHARMM36 / CGenFF force field</a><button id="retry-viewer" type="button" hidden>Retry viewer</button></div>
           <p id="archive-notice" role="status" hidden></p>
           <p id="assembly-status" class="sr-only" role="status" hidden></p><ol id="assembly-log" class="build-log" tabindex="0" aria-label="Build stages" aria-live="polite" hidden></ol><p id="build-total" hidden>Total build time: <time id="build-duration"></time></p><progress id="assembly-progress" hidden></progress>
@@ -250,11 +250,14 @@
     </div>
     <p>MolAR builder is an independent clean-room implementation of a CHARMM-GUI-like system builder for MD simulations and molecular modeling. It uses no code or copyrighted assets from CHARMM-GUI. The implementation is based entirely on published research papers and open-source resources.</p>
     <p>Under the hood, the builder uses the <a href="https://github.com/yesint/molar" target="_blank" rel="noopener">molar</a> molecular modeling library and the <a href="https://github.com/yesint/molar_vis" target="_blank" rel="noopener">molar_vis</a> visualizer. The frontend of the service is <a href="https://github.com/yesint/molar_builder_front" target="_blank" rel="noopener">open source</a>. The server backend is currently proprietary.</p>
-    <h3>Public beta and payment</h3>
-    <p>MolAR builder is in public beta. Each system submitted to the public service costs <strong>USD 1.00</strong>. The fee helps cover server costs and discourages automated submissions. You need a PayPal account to pay. By confirming payment, you agree to pay this fee for the submitted system. The fee is non-refundable.</p>
-    <h3>Beta participation and warranty</h3>
-    <p>Participation in the public beta is voluntary. You use the builder and its output at your own risk. The maintainers provide the service and its output as is, without any express or implied warranty to the extent permitted by law. They cannot guarantee uninterrupted access, individual support, or a fix for a reported problem.</p>
-    <p>You are responsible for checking the generated system before using it in a simulation or publication. The maintainers do not warrant that its coordinates, topology, or parameters are correct or suitable for your research. To the extent permitted by law, they accept no liability for losses arising from use of the service or its output.</p>
+    <div id="public-beta-terms">
+      <h3>Public beta</h3>
+      <p>MolAR builder is in public beta. Participation in beta testing is voluntary. A fee of <strong data-build-price>USD 0.50</strong> is charged for each system submitted to the public builder. The fee helps cover server costs and discourages automated submissions.</p>
+      <p>By submitting a system, you agree to use the builder and its output at your own risk. Both are provided as is, without warranty of any kind, to the extent permitted by law.</p>
+      <p>Generated systems may be used for any purpose under the <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">Creative Commons Attribution 4.0 International license (CC BY 4.0)</a>. Attribution is required when licensed material is shared. Third-party material remains subject to its own terms.</p>
+      <p>Submitted files are stored for processing, and payment records are retained. Generated systems are used to diagnose errors in the builder and may also be used to train AI models.</p>
+      <p>If you do not agree to these terms, do not submit a system.</p>
+    </div>
     <form id="about-actions" method="dialog"><button type="submit" class="secondary compact">Close</button></form>
   </dialog>
   <dialog id="lipid-picker" aria-labelledby="picker-heading">

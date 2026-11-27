@@ -38,6 +38,22 @@ try {
       iframe.remove();
       completeCheckout();
     }
+    const originalConfirm = window.confirm;
+    try {
+      const oldCheckout = popup();
+      let confirmedPrice;
+      globalThis.open = () => oldCheckout;
+      window.confirm = message => { confirmedPrice = message; return false; };
+      globalThis.fetch = async () => Response.json({amount: {currency_code: "USD", value: "1.00"}});
+      let error;
+      try { await checkoutBuild(async () => ({test: true}), "paypal-sandbox", {quotedPrice: "USD 0.50"}); }
+      catch (cause) { error = cause; }
+      assert(error instanceof CheckoutDismissed && confirmedPrice.includes("USD 1.00") && !oldCheckout.location.url,
+        "A previous order at a different price needs confirmation before PayPal opens");
+    } finally {
+      window.confirm = originalConfirm;
+      completeCheckout();
+    }
   } finally {
     globalThis.open = savedOpen;
     globalThis.fetch = savedFetch;
@@ -54,6 +70,10 @@ try {
     }
   }
   await waitFor(() => el("add-lipid")?.disabled === false && el("assemble-system").textContent.includes("Pay USD"));
+  assert(Array.from(el("public-beta-terms").children).every((node, i) =>
+    node.isEqualNode(el("submission-fee").children[i])) && el("public-beta-terms").childElementCount === el("submission-fee").childElementCount, "About and Submit show the same beta terms");
+  assert(el("assemble-system").textContent.includes("USD 0.50") && el("submission-fee").textContent.includes("USD 0.50"),
+    "The submit button and terms show the checkout price");
   const input = (id, value) => {
     el(id).value = value;
     el(id).dispatchEvent(new win.Event("input", {bubbles: true}));
@@ -70,7 +90,7 @@ try {
   win.fetch = async (url, opts) => {
     if (url.endsWith("/checkout")) {
       keys.push(opts.headers["X-Builder-Job"]);
-      return Response.json({url: "https://www.sandbox.paypal.com/checkoutnow?token=ORDER12345"});
+      return Response.json({amount: {currency_code: "USD", value: "0.50"}, url: "https://www.sandbox.paypal.com/checkoutnow?token=ORDER12345"});
     }
     assert(url.endsWith("/payment-status"), "An unpaid submission must not start a build");
     polls++;
