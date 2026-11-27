@@ -6,8 +6,8 @@ let currentPlan = null;
 const popupOrderKey = "molar-paypal-return-order";
 
 function openPaymentWindow() {
-  const popup = window.open("about:blank", "_blank", "popup,width=600,height=750");
-  if (!popup) throw new Error("Allow popups to open payment.");
+  const popup = window.open("about:blank", "_blank");
+  if (!popup) throw new Error("Allow the builder to open the PayPal tab.");
   popup.opener = null;
   return popup;
 }
@@ -63,10 +63,6 @@ export async function checkoutBuild(makePlan, mode = "paypal-sandbox", {signal, 
   let channel, wake;
   let returned = false;
   const wait = new AbortController();
-  function backToBuilder() {
-    returned = true;
-    wake?.();
-  }
   function stopWaiting() {
     wait.abort(new CheckoutDismissed("Checkout closed. Submit again to resume with the same build settings."));
     popup.close();
@@ -104,7 +100,8 @@ export async function checkoutBuild(makePlan, mode = "paypal-sandbox", {signal, 
       channel.postMessage("received");
       if (data === "cancel") stopWaiting();
       else {
-        backToBuilder();
+        returned = true;
+        wake?.();
         popup.close();
       }
       window.focus();
@@ -115,7 +112,6 @@ export async function checkoutBuild(makePlan, mode = "paypal-sandbox", {signal, 
       popup.sessionStorage?.setItem(popupOrderKey, orderId);
       popup.location.replace(url.href);
     }
-    window.addEventListener("focus", backToBuilder, {once: true});
     const deadline = Date.now() + 20 * 60 * 1000;
     let confirming = false;
     while (Date.now() < deadline) {
@@ -144,7 +140,6 @@ export async function checkoutBuild(makePlan, mode = "paypal-sandbox", {signal, 
     wait.signal.throwIfAborted();
     throw error;
   } finally {
-    window.removeEventListener("focus", backToBuilder);
     signal?.removeEventListener("abort", stopWaiting);
     channel?.close();
     popup.close();
