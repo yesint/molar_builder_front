@@ -50,50 +50,62 @@ try {
   const external = new win.DataTransfer();
   external.items.add(new win.File(["one\n\n\nM  END\n$$$$\ntwo\n\n\nM  END\n$$$$\n"], "separate.sdf"));
   $("ligand-files").files = external.files; $("ligand-files").dispatchEvent(new win.Event("change"));
-  await wait(() => $("separate-ligands").children.length === 2);
+  const choices = name => [...$("load-ligands").children].find(group => group.querySelector("h4").textContent === name);
+  const boxes = name => choices(name).querySelectorAll("input");
+  await wait(() => choices("separate.sdf"));
   $("partition-system").click(); await wait(() => !$("load-ready").hidden);
-  assert(win.location.hash === "#ligands" && $("prepared-ligands").textContent.includes("separate.sdf (mol 2)"), "Separate SDF records work without a protein upload");
+  assert(win.location.hash === "#ligands" && $("prepared-ligands").textContent.includes("separate.sdf | mol 2"), "Separate SDF records work without a protein upload");
   win.location.hash = "#load";
-  const allLigands = $("select-all-ligands");
-  assert(allLigands.checked, "All uploaded SDF records are selected");
-  allLigands.click();
-  assert($("separate-ligands").children.length === 2 && !$("load-actions").hidden, "Unchecked files remain available for selection");
+  assert(boxes("separate.sdf").length === 3 && boxes("separate.sdf")[0].checked, "All and both SDF records are shown");
+  boxes("separate.sdf")[0].click();
   const transfer = new win.DataTransfer(); transfer.items.add(new win.File(["fixture"], "protein.pdb"));
   $("structure-file").files = transfer.files; $("structure-file").dispatchEvent(new win.Event("change"));
-  await wait(() => $("structure-filename").textContent === "protein.pdb");
+  await wait(() => choices("protein.pdb"));
   const rect = element => element.getBoundingClientRect();
   assert(Math.abs(rect($("load-viewer")).top - rect(doc.querySelector("#page-load .protein-toolbar")).top) <= 2 && rect($("load-viewer")).left >= rect($("load-options")).right, "The Load viewer is to the right of the controls, aligned with the Load button");
-  assert($("load-heading").textContent === "1. Components" && $("load-chains").querySelectorAll("input").length === 2, "Components owns the chain selection controls");
+  assert($("load-heading").textContent === "1. Components" && $("load-chains").querySelectorAll("input").length === 3, "Components owns the chain selection controls");
   const componentFrame = $("load-viewer").querySelector("iframe"), componentMessages = [];
   await wait(() => componentFrame.dataset.stubReady === "yes");
   componentFrame.contentWindow.postMessage = data => componentMessages.push(data);
-  assert(allLigands.indeterminate, "Mixed PDB and SDF selection has a partial checkmark");
+  const allLigands = boxes("separate.sdf")[0];
+  assert(!allLigands.checked && boxes("protein.pdb")[0].checked, "Each file has independent choices");
   allLigands.click();
-  assert(componentMessages.at(-1).ligands && componentMessages.at(-1).externalLigands.every(item => item.selected), "Select all previews both ligand sources");
+  assert(componentMessages.at(-1).ligands && componentMessages.at(-1).externalLigands.every(item => item.ligands === "all"), "The SDF file's All previews both records");
   allLigands.click();
-  assert(!componentMessages.at(-1).ligands && componentMessages.at(-1).externalLigands.every(item => !item.selected), "Deselect all clears both ligand sources");
-  $("load-ligands").querySelector("input").click();
-  const sdfChoice = $("separate-ligands").querySelector("input");
+  assert(componentMessages.at(-1).ligands && componentMessages.at(-1).externalLigands.every(item => !item.ligands), "Clearing one file preserves the other file");
+  const sdfChoice = boxes("separate.sdf")[1];
   sdfChoice.click();
-  assert(componentMessages.at(-1).externalLigands.filter(item => item.selected).length === 1 &&
-    componentMessages.at(-1).ligands && componentFrame === $("load-viewer").querySelector("iframe"),
-    "PDB and SDF ligand selections share the existing viewer");
-  sdfChoice.click();
-  $("load-chains").querySelectorAll("input")[1].click();
-  assert(componentMessages.at(-1).protein === "resindex 0 1 2 5", "Chain selection updates the Components viewer");
-  $("protein-custom-tab").click(); input("component-protein-selection", "chain A and not resname ATP");
-  $("ligand-custom-tab").click(); input("component-ligand-selection", "resname ATP");
-  await wait(() => componentMessages.at(-1)?.ligands === "resname ATP");
-  assert(componentMessages.at(-1).protein === "chain A and not resname ATP" && !$("protein-custom-panel").hidden && $("protein-chains-panel").hidden, "Custom component selections preview the entered Molar expressions");
-  input("component-ligand-selection", ""); $("ligand-residues-tab").click(); $("ligand-custom-tab").click();
-  assert($("component-ligand-selection").value === "", "Switching tabs preserves an explicitly empty custom selection");
-  input("component-ligand-selection", "resname ATP");
+  assert(componentMessages.at(-1).externalLigands.filter(item => item.ligands).length === 1 && componentFrame === $("load-viewer").querySelector("iframe"), "A single record updates in the existing scene");
+  sdfChoice.click(); $("load-chains").querySelectorAll("input")[2].click();
+  assert(componentMessages.at(-1).protein === "resindex 0:2 5", "Chain selection updates the Components viewer");
+  const addSelection = (component, source, expression) => {
+    const field = $(component + "-selection-" + source);
+    input(field.id, expression); field.nextElementSibling.click();
+  };
+  $("protein-custom-tab").click(); addSelection("protein", 1, "(chain A) and not (resname ATP)");
+  $("ligand-custom-tab").click(); addSelection("ligand", 1, "resname ATP");
+  const proteinUnion = "(resindex 0:2 5) or ((chain A) and not (resname ATP))";
+  const ligandUnion = "(resindex 4) or (resname ATP)";
+  assert(componentMessages.at(-1).protein === proteinUnion && componentMessages.at(-1).ligands === ligandUnion,
+    "Checked and custom components are previewed together");
+  const sdfEditor = $("ligand-selection-0").closest(".custom-source"), dropdown = sdfEditor.querySelector("select");
+  assert(!$("ligand-custom-panel").querySelector("input[type=checkbox]") && !allLigands.checkVisibility()
+    && dropdown.options.length === 2, "Custom selection offers model-scoped editing controls without checkboxes");
+  addSelection("ligand", 0, "name C");
+  dropdown.selectedIndex = 1; dropdown.dispatchEvent(new win.Event("change")); addSelection("ligand", 0, "name O");
+  assert([...sdfEditor.querySelectorAll("li")].map(li => li.querySelector("span").textContent + " " + li.querySelector("input").value).join("|") === "mol 1 name C|mol 2 name O", "Saved selections identify their SDF record");
+  assert(componentMessages.at(-1).externalLigands.map(m => m.ligands).join("|") === "name C|name O", "Expressions apply only to the chosen record");
+  sdfEditor.querySelector("li button").click(); sdfEditor.querySelector("li button").click();
+  addSelection("ligand", 1, "name P"); $("ligand-selection-1").closest(".custom-source").querySelectorAll("li button")[1].click();
+  $("ligand-residues-tab").click(); $("ligand-custom-tab").click();
+  assert($("ligand-custom-panel").querySelectorAll("li").length === 1 && componentMessages.at(-1).ligands === ligandUnion,
+    "Deleting one expression and switching tabs preserves the other choices");
   $("partition-system").click();
   await wait(() => !$("protein-options").disabled && !$("load-ready").hidden);
-  assert($("structure-filename").textContent === "protein.pdb", "The loaded filename is shown");
+  assert($("structure-filename").textContent.includes("protein.pdb"), "The loaded filename is shown");
   assert($("protein-ready").hidden, "The project tree does not mark an unbuilt protein as ready");
   assert(!$("protein-chains"), "Protein preparation does not redefine component membership");
-  assert(partitionRequest.protein_selection === "chain A and not resname ATP" && partitionRequest.ligand_selection === "resname ATP", "Continue submits the exact custom expressions");
+  assert(partitionRequest.protein_selection === proteinUnion && partitionRequest.ligand_selection === ligandUnion, "Continue submits the exact custom expressions");
   assert(doc.querySelectorAll("#orient-protein").length === 1 && $("orient-protein").checked, "One Orient checkbox applies to all enabled chains");
   assert($("load-ligands").textContent.includes("ATP A:401") && !$("protein-ptms").textContent.includes("SEP B:4"), "Ligands and existing PTMs are detected");
   assert($("protein-ss").textContent.includes("0.203 nm"), "Detected SS bonds include their distance");
@@ -264,6 +276,11 @@ try {
   $("orient-protein").click();
   assert($("protein-ready").hidden && $("assemble-system").disabled && $("assembly-download").textContent === "Save previous ZIP", "Protein edits invalidate the batch and require confirming settings again");
   assert(!$("ligand-ready").hidden, "Protein edits preserve independent ligand configuration");
+  const removeFiles = () => {
+    while (doc.querySelector(".component-filename button")) doc.querySelector(".component-filename button").click();
+    $("ligand-residues-tab").click(); $("protein-chains-tab").click();
+  };
+  removeFiles();
   const repeated = [residues[0], {...residues[0],id:10001}];
   const manyLigands = Array.from({length:5000}, (_,i) => ({id:i+10,chain:"L",number:i+1,name:"ATP",protein:false,preview_index:i+2}));
   const manyOther = Array.from({length:5000}, (_,i) => ({id:i+20000,chain:"X",number:i+1,name:"UNX",protein:false,preview_index:i+5002}));
@@ -273,13 +290,13 @@ try {
   const largeTransfer = new win.DataTransfer(); largeTransfer.items.add(new win.File(["large"], "large.pdb"));
   $("structure-file").files = largeTransfer.files; $("structure-file").dispatchEvent(new win.Event("change"));
   await wait(() => !$("load-options").disabled);
-  assert($("load-ligands").querySelectorAll("input").length === 2 && $("load-ligands").textContent.includes("5000"), `Thousands of ligands use one grouped control: ${$("protein-error").textContent} / ${$("load-ligands").textContent}`);
-  assert(!$("load-ligands").querySelectorAll("input")[1].checked, "Unclassified residues are not automatically retained as ligands");
-  assert($("load-environment").textContent.includes("PW, water (12558)"), "Solvent is shown as a summary");
-  const water = $("load-environment").querySelector("input");
+  assert($("load-ligands").querySelectorAll("input").length === 4 && $("load-ligands").textContent.includes("5000"), `Thousands of ligands use one grouped control: ${$("protein-error").textContent} / ${$("load-ligands").textContent}`);
+  assert(!$("load-ligands").querySelectorAll("input")[2].checked, "Unclassified residues are not automatically retained as ligands");
+  assert($("load-ligands").textContent.includes("PW, water (12558)"), "Solvent is shown as a summary");
+  const water = $("load-ligands").querySelectorAll("input")[3];
   assert(!water.checked, "Water is initially excluded");
   water.click(); $("ligand-custom-tab").click();
-  assert($("component-ligand-selection").value.endsWith(" or resname PW"), "Selecting water adds its group to the ligand expression");
+  assert(water.checked && !water.checkVisibility() && !$("ligand-custom-panel").querySelector("input[type=checkbox]"), "Choosing water adds it to ligands without copying checkboxes to Custom");
   $("ligand-residues-tab").click(); water.click();
   const details = $("load-ligands").querySelector("details"); details.open = true;
   await wait(() => details.querySelectorAll("input").length === 100);
@@ -287,6 +304,7 @@ try {
   [...details.querySelectorAll("button")].find(b=>b.textContent==="Next").click();
   assert(details.textContent.includes("L:101"), "All ligand pages remain accessible");
   assert($("load-ready").hidden && $("protein-ready").hidden && $("ligand-ready").hidden, "Loading a new system invalidates all completed steps");
+  removeFiles();
   const extra = { ...loaded, upload_id:"ptm-types", partition_id:"ptm-partition", chains:[{id:"A",residues:3}],
     residues:[{id:0,chain:"A",number:56,name:"ASN",protein:true,glycosylatable:true},
       {id:1,chain:"A",number:35,name:"CYS",protein:true,cysteine:true,lipidatable:true},
@@ -294,7 +312,8 @@ try {
     ptms:[], ligands:[], ss_bonds:[{residues:[1,2],distance_nm:.20}] };
   win.fetch = async url => new win.Response(url.endsWith("/load/structure") ? JSON.stringify(extra)
     : url.endsWith("/load/partition") ? JSON.stringify({protein:extra,ligands:[]}) : "data_fixture");
-  $("structure-file").files = transfer.files;
+  const ptmFiles = new win.DataTransfer(); ptmFiles.items.add(new win.File(["fixture"], "ptm.pdb"));
+  $("structure-file").files = ptmFiles.files;
   $("structure-file").dispatchEvent(new win.Event("change")); await wait(() => !$("load-options").disabled);
   $("partition-system").click(); await wait(() => !$("protein-options").disabled && !$("load-ready").hidden);
   $("add-ptm").click();
@@ -335,6 +354,7 @@ try {
   $("partition-system").click();await wait(()=>!$("protein-options").disabled && !$("load-ready").hidden);
   assert($("add-ptm").disabled,"An internal Gly cannot receive N-terminal myristoylation");
   const unk = {id:0, chain:"E", number:0, name:"UNK", atoms:50, protein:false, preview_index:0};
+  removeFiles();
   const standalone = {...loaded, atoms:50, chains:[], ligands:[], residues:[unk], other:[unk], environment:[]};
   win.fetch = async url => new win.Response(url.endsWith("/load/structure") ? JSON.stringify(standalone) : "data_fixture");
   win.location.hash = "#load";
@@ -344,6 +364,7 @@ try {
   const standaloneFrame = $("load-viewer").querySelector("iframe"), files = [];
   standaloneFrame.contentWindow.postMessage = data => files.push(data);
   win.dispatchEvent(new win.MessageEvent("message", {origin:win.location.origin,source:standaloneFrame.contentWindow,data:{type:"ready"}}));
+  await wait(() => files.length > 0);
   assert(files[0]?.protein === "" && files[0].ligands === "resindex 0" && files[0].ligandStyle === "ballstick",
     "A standalone unknown ligand opens in ball-and-stick representation");
   const checkbox = $("load-ligands").querySelector("input");
@@ -355,11 +376,55 @@ try {
   setLigands(waters);
   assert($("prepared-ligands").textContent === "HOH (7)" && !$("prepared-ligands").querySelector("button, details")
     && ligandState.items.length === 7, "Seven retained waters have one summary and preserve all seven assembly inputs");
+  setLigands([...waters.map(item => ({...item, origin:"protein.pdb"})), {...waters[0], origin:"second.cif | model 2"}]);
+  assert($("prepared-ligands").textContent.includes("protein.pdb | HOH, water (7)") &&
+    $("prepared-ligands").textContent.includes("second.cif | model 2 | HOH, water (1)"), "Water summaries identify their source file and model");
+  setLigands(waters);
   ligandState.sources = waters.map(item => ({item}));
   const {invalidateAssembly} = await win.eval('import("/assembly.js")');
   invalidateAssembly();
   assert($("submit-summary").textContent.includes("Parameterize ligands (HOH ×7)"),
     "The submission summary counts repeated water molecules once");
+  removeFiles(); win.location.hash = "#load";
+  let multiRequest;
+  win.fetch = async (url, options) => {
+    if (url.endsWith("/load/structure")) {
+      const id = options.body.name;
+      const report = number => ({...loaded, upload_id: id + number, structure_url: "/" + id + number + ".cif"});
+      return win.Response.json({...report(1), additional_models: [report(2)]});
+    }
+    if (url.endsWith("/load/partition")) {
+      multiRequest = JSON.parse(options.body);
+      return win.Response.json({protein:null, ligands:[], sdf_ligands:[{source:0, cif:null}]});
+    }
+    return new win.Response("data_fixture");
+  };
+  const pair = new win.DataTransfer();
+  for (const name of ["first.pdb","second.cif"]) pair.items.add(new win.File(["fixture"], name));
+  $("structure-file").files = pair.files; $("structure-file").dispatchEvent(new win.Event("change"));
+  await wait(() => choices("second.cif"));
+  const records = new win.DataTransfer();
+  records.items.add(new win.File(["one\n\n\nM  END\n$$$$\ntwo\n\n\nM  END\n$$$$\n"], "models.sdf"));
+  $("ligand-files").files = records.files; $("ligand-files").dispatchEvent(new win.Event("change"));
+  await wait(() => choices("models.sdf"));
+  boxes("models.sdf")[0].click();
+  $("protein-custom-tab").click(); $("ligand-custom-tab").click();
+  function modelEditor(role, name, modelNumber, value) {
+    const group = [...$(role + "-custom-panel").children].find(el => el.querySelector("label").textContent === name);
+    const menu = group.querySelector("select"); menu.selectedIndex = modelNumber - 1;
+    menu.dispatchEvent(new win.Event("change"));
+    const field = group.querySelector("input"); input(field.id, value); field.nextElementSibling.click();
+    return group;
+  }
+  modelEditor("protein", "first.pdb", 2, "chain B");
+  modelEditor("ligand", "second.cif", 2, "resname ATP");
+  modelEditor("ligand", "models.sdf", 2, "name O");
+  $("partition-system").click(); await wait(() => multiRequest && !$("load-ready").hidden);
+  assert(multiRequest.structures.map(s => s.upload_id).join() === "first.pdb1,first.pdb2,second.cif1,second.cif2"
+    && multiRequest.structures[1].protein_selection === "chain B" && multiRequest.structures[3].ligand_selection === "resname ATP",
+    "Continue combines model-specific selections from all uploaded structures");
+  assert(multiRequest.sdf_selections.length === 1 && multiRequest.sdf_selections[0].sdf.startsWith("two\n")
+    && multiRequest.sdf_selections[0].ligand_selection === "name O", "Only the selected SDF record is submitted");
   report = "PASS: protein controls, deferred batch order, margin sizing, no-membrane assembly, failure/retry, global Orient, modifications, handoff, grouped large inventories, environment summaries, and resindex labels";
 } catch (error) { report = `FAIL: ${error.stack || error}`; }
 await fetch("/test-result", {method:"POST",body:report});

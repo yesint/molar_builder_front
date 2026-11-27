@@ -369,7 +369,7 @@ export function ligandGroupLabel(name, count) {
 
 export function ligandHeaders(item, cif) {
   const headers = { "Content-Type": cif instanceof Blob ? "chemical/x-mdl-sdfile" : "chemical/x-cif" };
-  if (!item.file && !editedInViewer.has(item.structure_url)) headers["X-Ligand-Source"] = new URL(item.structure_url, location.href).pathname;
+  if (!item.file && !item.structure_url.startsWith("blob:") && !editedInViewer.has(item.structure_url)) headers["X-Ligand-Source"] = new URL(item.structure_url, location.href).pathname;
   return headers;
 }
 
@@ -428,22 +428,33 @@ export function setLigands(items) {
   search.parentElement.hidden = !items.length;
   function renderList() {
     const query = search.value.trim().toLowerCase();
-    const groups = Map.groupBy(items.filter(item => item.residue.name.toLowerCase().includes(query)), item => item.residue.name);
+    const matches = items.filter(item => item.residue.name.toLowerCase().includes(query));
+    const groups = Array.from(Map.groupBy(matches, item => item.origin), ([, entries]) =>
+      [...Map.groupBy(entries, item => item.residue.name)]).flat();
+    function withOrigin(control, ligand, detail) {
+      if (!ligand.origin) return control;
+      const row = document.createElement("div"), origin = document.createElement("span");
+      row.className = "ligand-source-row"; origin.className = "small";
+      origin.textContent = `${ligand.origin} | ${detail}`; row.append(control, origin);
+      return row;
+    }
     function button(ligand) {
       const control = document.createElement("button"); control.type = "button"; control.className = "secondary";
-      control.textContent = residueLabel(ligand.residue);
+      control.textContent = ligand.label || residueLabel(ligand.residue);
       control.onclick = () => showLigand(ligand).catch(e => ligandError(e.message));
-      return control;
+      return withOrigin(control, ligand, control.textContent);
     }
-    $("prepared-ligands").replaceChildren(paged([...groups], ([name, copies]) => {
+    $("prepared-ligands").replaceChildren(paged(groups, ([name, copies]) => {
       if (copies.every(isStandardWater)) {
         const row = document.createElement("div");
         row.textContent = `${name} (${copies.length})`;
-        return row;
+        return withOrigin(row, copies[0], `${name}, water (${copies.length})`);
       }
       if (copies.length === 1) return button(copies[0]);
       const group = document.createElement("details"), summary = document.createElement("summary");
-      summary.textContent = `${name} (${copies.length})`;
+      const title = document.createElement("span");
+      title.textContent = `${name} (${copies.length})`;
+      summary.append(withOrigin(title, copies[0], title.textContent));
       group.append(summary, paged(copies, button)); return group;
     }));
   }

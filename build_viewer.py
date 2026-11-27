@@ -45,6 +45,8 @@ def main():
         revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=checkout, text=True).strip()
         if revision != source["commit"]:
             raise SystemExit("The checkout is not at the pinned molar_vis commit.")
+        for patch in source.get("patches", []):
+            run("git", "apply", "--unidiff-zero", str(BUNDLE.parents[1] / patch), cwd=checkout)
         package = root / "package"
         run("wasm-pack", "build", "crates/molar_vis_js", "--target", "web", "--release",
             *([] if source.get("wasm_opt", True) else ["--no-opt"]),

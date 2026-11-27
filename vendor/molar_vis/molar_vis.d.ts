@@ -143,6 +143,10 @@ export class RepHandle {
      * Set fluid bonds and bond-color blending (both 0–1) for ball-and-stick.
      */
     set_ballstick_bonds(fluid_bonds: number, color_blend: number): Promise<void>;
+    /**
+     * Show or hide the cached representation on the next viewer frame.
+     */
+    set_visible(visible: boolean): Promise<void>;
     readonly molId: number;
     readonly repId: number;
     set color(value: string);
@@ -403,6 +407,7 @@ export interface InitOutput {
     readonly rephandle_set_color: (a: number, b: number, c: number) => void;
     readonly rephandle_set_material: (a: number, b: number, c: number) => void;
     readonly rephandle_set_style: (a: number, b: number, c: number) => void;
+    readonly rephandle_set_visible: (a: number, b: number) => any;
     readonly rephandle_set_width: (a: number, b: number) => [number, number];
     readonly sel_numAtoms: (a: number) => number;
     readonly start: (a: number, b: number) => [number, number, number];

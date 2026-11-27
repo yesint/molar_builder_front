@@ -6,6 +6,7 @@ let viewer;
 let received = false;
 let proteinView = null;
 let proteinUpdates = Promise.resolve();
+let latestSelection = null;
 let editableLigand = null;
 let lastLigandCif = null;
 let ligandEditTimer;
@@ -89,51 +90,68 @@ async function updateProteinView(data) {
     ["ligands", data.ligands, proteinView.ligandStyle, "element"],
     ["ptms", data.ptms && data.protein ? `(${data.protein}) and (${data.ptms})` : "", "ballstick", "element"],
     ["disulfides", data.disulfides && data.protein ? `(${data.protein}) and (${data.disulfides})` : "", "ballstick", "element"],
-  ].filter(([key, selection]) => {
-    try { return nonemptySelection(system, selection); }
-    catch (error) {
-      const label = { protein: "Protein", ligands: "Ligand", ptms: "PTM", disulfides: "SS bond" }[key];
-      throw new Error(`${label} selection: ${error.message}`);
-    }
-  });
+  ].filter(([, selection]) => selection?.trim() && selection.trim() !== "not all");
   if (system && !proteinView.molecule) {
     // Start without a default Lines representation; every role is created fully styled.
     proteinView.molecule = viewer.add_mol(system, true);
     await showMembranePlanes(planes);
   }
   let addedLigand = false;
-  for (const { key, selected, file } of data.externalLigands || []) {
-    let entry = proteinView.external.get(key);
-    if (!entry && selected) {
-      const ligand = System.from_bytes("ligand.sdf", new Uint8Array(await file.arrayBuffer()));
-      try { entry = { molecule: viewer.add_mol(ligand, true), rep: null }; }
-      finally { ligand.free(); }
-      proteinView.external.set(key, entry);
-      addedLigand = true;
-    }
-    if (selected && !entry.rep) entry.rep = await entry.molecule.add_rep_text("all", "ballstick", "element");
-    if (!selected && entry?.rep) {
-      await entry.rep.remove(); entry.rep.free(); entry.rep = null;
-    }
-  }
-  const keys = new Set(specifications.map(([key]) => key));
-  for (const [key, entry] of proteinView.reps) {
-    if (!keys.has(key)) {
-      await entry.rep.remove(); entry.rep.free(); proteinView.reps.delete(key);
-    }
-  }
-  for (const [key, selection, repStyle, color] of specifications) {
-    const entry = proteinView.reps.get(key);
-    if (entry) {
-      if (entry.selection !== selection) {
-        await entry.rep.select_text(selection); entry.selection = selection;
+  const external = data.externalLigands || [];
+  async function updateModels(models) {
+    const updates = await Promise.allSettled(models.map(async ({key, format, style, protein, ligands}) => {
+      let entry = proteinView.external.get(key);
+      if (!entry) {
+        if (!protein && !ligands) return;
+        const response = await fetch(key);
+        const ligand = System.from_bytes("model." + format, new Uint8Array(await response.arrayBuffer()));
+        try { entry = { molecule: viewer.add_mol(ligand, true), reps: new Map() }; }
+        finally { ligand.free(); }
+        proteinView.external.set(key, entry);
+        addedLigand = true;
       }
-    } else {
-      const rep = await proteinView.molecule.add_rep_text(selection, repStyle, color);
-      proteinView.reps.set(key, { rep, selection });
-    }
+      await updateRepresentations(entry, [
+        ["protein", protein, style, "chain"], ["ligands", ligands, "ballstick", "element"],
+      ].filter(([, selection]) => selection));
+    }));
+    const failed = updates.find(update => update.status === "rejected");
+    if (failed) throw failed.reason;
+  }
+  // Queue all visibility changes for the same viewer frame. Limit concurrent file reads on first load.
+  const cached = [], unloaded = [];
+  for (const model of external) {
+    if (proteinView.external.has(model.key)) cached.push(model);
+    else if (model.protein || model.ligands) unloaded.push(model);
+  }
+  await Promise.all([updateModels(cached), system && updateRepresentations(proteinView, specifications)]);
+  for (let i = 0; i < unloaded.length; i += 64) {
+    if (data.type === "protein-selection" && latestSelection !== data) return;
+    await updateModels(unloaded.slice(i, i + 64));
   }
   if (addedLigand && data.type === "protein-selection") (await viewer.reset_view(0)).free();
+}
+
+async function updateRepresentations(entry, specifications) {
+  const keys = new Set(specifications.map(([key]) => key));
+  for (const [key, previous] of entry.reps) {
+    if (!keys.has(key) && previous.visible) {
+      await previous.rep.set_visible(false); previous.visible = false;
+    }
+  }
+  for (const [key, selection, style, color] of specifications) {
+    const previous = entry.reps.get(key);
+    try {
+      if (previous) {
+        if (previous.selection !== selection) {
+          await previous.rep.select_text(selection); previous.selection = selection;
+        }
+        if (!previous.visible) { await previous.rep.set_visible(true); previous.visible = true; }
+      } else {
+        const rep = await entry.molecule.add_rep_text(selection, style, color);
+        entry.reps.set(key, {rep, selection, visible: true});
+      }
+    } catch (error) { throw new Error(`${key} selection: ${error.message || error}`); }
+  }
 }
 
 function unavailable(cause) {
@@ -168,7 +186,9 @@ window.addEventListener("message", async event => {
     return;
   }
   if (event.data?.type === "protein-selection" && proteinView) {
+    latestSelection = event.data;
     proteinUpdates = proteinUpdates.then(async () => {
+      if (latestSelection !== event.data) return;
       await updateProteinView(event.data);
       notify({ type: "selection-valid", requestId: event.data.requestId });
     }).catch(error => notify({ type: "selection-error", requestId: event.data.requestId, message: error.message }));

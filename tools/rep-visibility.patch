@@ -1,0 +1,24 @@
+diff --git a/crates/molar_vis_core/src/app.rs b/crates/molar_vis_core/src/app.rs
+index 2b35cb4..f50dd9e 100644
+--- a/crates/molar_vis_core/src/app.rs
++++ b/crates/molar_vis_core/src/app.rs
+@@ -707,0 +708,8 @@ impl App {
++    /// Toggle a representation without rebuilding its geometry.
++    pub fn set_rep_visible(&mut self, mol_id: u64, rep_id: u64, visible: bool) -> Result<(), String> {
++        let (mi, ri) = self.resolve_rep(mol_id, rep_id)?;
++        self.scene.molecules[mi].reps[ri].visible = visible;
++        self.view_dirty = true;
++        Ok(())
++    }
++
+diff --git a/crates/molar_vis_js/src/lib.rs b/crates/molar_vis_js/src/lib.rs
+index 3f4b343..36f95f8 100644
+--- a/crates/molar_vis_js/src/lib.rs
++++ b/crates/molar_vis_js/src/lib.rs
+@@ -1330,0 +1331,6 @@ impl RepHandle {
++    /// Show or hide the cached representation on the next viewer frame.
++    pub async fn set_visible(&self, visible: bool) -> Result<(), JsError> {
++        let (mol, rep) = (self.mol, self.rep);
++        query_job(&self.jobs, move |app| app.set_rep_visible(mol, rep, visible)).await
++    }
++
