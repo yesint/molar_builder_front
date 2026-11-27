@@ -1,0 +1,33 @@
+[package]
+name = "builder-ui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+futures-channel = "0.3"
+futures-util = "0.3"
+gloo-net = "0.6"
+gloo-timers = { version = "0.3", features = ["futures"] }
+js-sys = "0.3"
+leptos = { version = "0.8", features = ["csr"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+    "Blob", "Crypto", "File", "FileList", "HtmlAnchorElement", "HtmlCanvasElement",
+    "HtmlInputElement", "Location", "Storage", "Url", "Window",
+] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+molar = { version = "=2.4.2", default-features = false }
+molar_vis_web = { git = "https://github.com/yesint/molar_vis", rev = "4d549f1506edc4471861d2694262869468a93f82" }
+
+[workspace]
+
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.release]
+strip = true

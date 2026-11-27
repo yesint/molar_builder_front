@@ -1,9 +1,36 @@
-# MolAR Builder
+# MolAR Builder for the browser
 
-MolAR Builder is a clean-room reimplementation of CHARMM-GUI workflows for preparing molecular dynamics simulations in GROMACS. You can build systems from proteins, small-molecule ligands, and lipids in any combination, from a single ligand in solution to a protein–ligand complex embedded in a mixed lipid bilayer.
+This branch contains the Leptos frontend for MolAR Builder. It lets you select proteins and ligands, edit ligand geometry, configure a lipid bilayer and solvent, and download a GROMACS system. The molecular viewer runs in the same WebAssembly module as the application. Leptos calls the Rust viewer API directly.
 
-You can mutate proteins, add post-translational modifications, parameterize ligands, and choose whether to add water and ions. Each build produces a ZIP with coordinates, topology files, and GROMACS inputs for energy minimization and equilibration.
+## Build and run
 
-A nominal fee of USD 0.50 per build deters spam and helps cover server costs.
+Install the Rust WebAssembly target and Trunk, then build the browser assets.
 
-[Open MolAR Builder](https://yesint.github.io/molar_builder_front/)
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install trunk --locked
+trunk build --release --locked
+```
+
+The build writes the HTML, style sheet, WebAssembly module, generated browser loader and lipid catalogue to `dist/`. The Rust backend can serve this directory. For interactive frontend development, start the local Rust backend on port 8003, then run the following command in this checkout.
+
+```sh
+trunk serve --port 8080
+```
+
+The deployed frontend uses the payment mode and price reported by the backend. Local builds run without payment. The sandbox and production services use their respective PayPal checkouts.
+
+## Source and checks
+
+The step views live in `src/app/`. The viewer controller in `src/viewer.rs` owns the canvas, the molecular scene, and ligand edit events. Trunk generates the JavaScript needed to load the module and call browser APIs.
+
+```sh
+cargo install leptosfmt --locked
+leptosfmt src
+cargo fmt
+leptosfmt --check src
+cargo fmt --check
+cargo clippy --locked --all-targets --target wasm32-unknown-unknown -- -D warnings
+```
+
+The molecular viewer is distributed under the Artistic License 2.0. [MolAR viewer](https://github.com/yesint/molar_vis)

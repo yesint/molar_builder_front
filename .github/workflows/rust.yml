@@ -1,0 +1,19 @@
+name: Check Leptos frontend
+on:
+  push:
+    branches: [leptos]
+  pull_request:
+    branches: [leptos]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup update stable && rustup default stable
+      - run: rustup component add rustfmt clippy && rustup target add wasm32-unknown-unknown
+      - run: cargo install leptosfmt --version 0.1.34 --locked
+      - run: leptosfmt --check src
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets --target wasm32-unknown-unknown -- -D warnings
