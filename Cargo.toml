@@ -28,6 +28,3 @@ molar_vis_web = { git = "https://github.com/yesint/molar_vis", rev = "4d549f1506
 [profile.dev]
 debug = 0
 incremental = false
-
-[profile.release]
-strip = true

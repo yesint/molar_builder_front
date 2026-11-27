@@ -14,7 +14,11 @@ pub(super) fn protein(ui: Ui) -> impl IntoView {
     let iupac = RwSignal::new("GlcNAc".to_string());
     let charge = RwSignal::new(-2i8);
     let anomer = RwSignal::new("b".to_string());
-    let bond = RwSignal::new(0usize);
+    let inventory = StoredValue::new(residues.clone());
+    let possible_bonds = p.protein["ss_bonds"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let names = "ALA ARG ASN ASP CYS GLN GLU GLY HIS ILE LEU LYS MET PHE PRO SER THR TRP TYR VAL";
     view! {
         <label>
@@ -90,53 +94,87 @@ pub(super) fn protein(ui: Ui) -> impl IntoView {
         </label>
         <section hidden=move || {
             kind.get() != "glycosylation"
-        }>
-            {super::glycan::editor(ui, residue, StoredValue::new(residues.clone()), iupac, anomer)}
-        </section>
-        <button on:click=move |_| {
-            ui.plan
-                .update(|p| {
-                    let k = kind.get_untracked();
-                    let mut v = json!({"residue":residue.get_untracked(),"type":k});
-                    if k == "phosphorylation" {
-                        v["charge"] = json!(charge.get_untracked());
-                    }
-                    if k == "glycosylation" {
-                        v["iupac"] = json!(iupac.get_untracked());
-                        v["root_anomer"] = json!(anomer.get_untracked());
-                    }
-                    p.protein.ptms.push(v);
-                })
-        }>"Add modification"</button>
-        <h2>"Disulfide bonds"</h2>
-        <label>
-            "Partner residue"
-            <select on:change=move |e| bond.set(event_target_value(&e).parse().unwrap_or_default())>
-                <option value="">"Choose cysteine"</option>
-                {residues
-                    .iter()
-                    .filter(|r| r["cysteine"] == true)
-                    .map(|r| {
-                        view! {
-                            <option value=r["id"]
-                                .to_string()>
-                                {format!("{} {}", r["chain"].as_str().unwrap_or(""), r["number"])}
-                            </option>
-                        }
+        }>{super::glycan::editor(ui, residue, inventory, iupac, anomer)}</section>
+        <button
+            disabled=move || {
+                let selected = residue.get();
+                let modification = kind.get();
+                !ui
+                    .plan
+                    .with(|plan| {
+                        inventory
+                            .with_value(|rows| can_modify(
+                                &plan.protein,
+                                rows,
+                                selected,
+                                &modification,
+                            ))
                     })
-                    .collect_view()}
-            </select>
-        </label>
-        <button on:click=move |_| {
-            ui.plan
-                .update(|p| {
-                    let a = residue.get_untracked() as usize;
-                    let b = bond.get_untracked();
-                    if a != b {
-                        p.protein.ss_bonds.push([a, b]);
-                    }
-                })
-        }>"Add disulfide bond"</button>
+            }
+            on:click=move |_| {
+                ui.plan
+                    .update(|p| {
+                        let k = kind.get_untracked();
+                        let mut v = json!({"residue":residue.get_untracked(),"type":k});
+                        if k == "phosphorylation" {
+                            v["charge"] = json!(charge.get_untracked());
+                        }
+                        if k == "glycosylation" {
+                            v["iupac"] = json!(iupac.get_untracked());
+                            v["root_anomer"] = json!(anomer.get_untracked());
+                        }
+                        p.protein.ptms.push(v);
+                    })
+            }
+        >
+            "Add modification"
+        </button>
+        <h2>"Disulfide bonds"</h2>
+        {possible_bonds
+            .into_iter()
+            .filter_map(|candidate| {
+                let pair: [usize; 2] = serde_json::from_value(candidate["residues"].clone()).ok()?;
+                let labels = pair
+                    .map(|id| {
+                        inventory
+                            .with_value(|rows| {
+                                rows.iter()
+                                    .find(|r| r["id"] == id)
+                                    .map(|r| {
+                                        format!(
+                                            "{} {}",
+                                            r["chain"].as_str().unwrap_or(""),
+                                            r["number"],
+                                        )
+                                    })
+                                    .unwrap_or_default()
+                            })
+                    });
+                let distance = candidate["distance_nm"].as_f64()?;
+                Some(
+                    view! {
+                        <label>
+                            <input
+                                type="checkbox"
+                                prop:checked=move || {
+                                    ui.plan.with(|p| p.protein.ss_bonds.contains(&pair))
+                                }
+                                on:change=move |event| {
+                                    ui.plan
+                                        .update(|p| {
+                                            p.protein.ss_bonds.retain(|entry| entry != &pair);
+                                            if input(&event).checked() {
+                                                p.protein.ss_bonds.push(pair);
+                                            }
+                                        })
+                                }
+                            />
+                            {format!("Cys {} – Cys {} ({distance:.3} nm)", labels[0], labels[1])}
+                        </label>
+                    },
+                )
+            })
+            .collect_view()}
         {move || {
             let p = ui.plan.get().protein;
             [
@@ -175,4 +213,35 @@ pub(super) fn protein(ui: Ui) -> impl IntoView {
         }}
     }
     .into_any()
+}
+
+fn can_modify(protein: &Protein, residues: &[Value], id: u64, kind: &str) -> bool {
+    let Some(residue) = residues.iter().find(|r| r["id"] == id) else {
+        return false;
+    };
+    if residue["coarse_grained"] == true || protein.ptms.iter().any(|m| m["residue"] == id) {
+        return false;
+    }
+    let name = protein
+        .mutations
+        .iter()
+        .find(|m| m["residue"] == id)
+        .and_then(|m| m["target"].as_str())
+        .or(residue["name"].as_str())
+        .unwrap_or("");
+    let free_cysteine = name == "CYS"
+        && !protein
+            .ss_bonds
+            .iter()
+            .flatten()
+            .any(|&bond| bond as u64 == id);
+    match kind {
+        "phosphorylation" => matches!(name, "SER" | "THR" | "TYR"),
+        "palmitoylation" | "farnesylation" | "geranylgeranylation" => free_cysteine,
+        "triacylation" => free_cysteine && residue["n_terminal"] == true,
+        "lysine_myristoylation" => name == "LYS",
+        "glycine_myristoylation" => name == "GLY" && residue["n_terminal"] == true,
+        "glycosylation" => matches!(name, "ASN" | "SER" | "THR"),
+        _ => false,
+    }
 }

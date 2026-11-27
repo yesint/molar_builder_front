@@ -5,6 +5,7 @@ pub(super) struct Download {
     name: String,
     archive: std::sync::Arc<Vec<u8>>,
     coordinates: std::sync::Arc<Vec<u8>>,
+    ligands: Vec<std::sync::Arc<Vec<u8>>>,
 }
 
 impl Download {
@@ -124,6 +125,34 @@ pub(super) fn submit(ui: Ui) -> impl IntoView {
                 }
             }>"View completed system"</button>
         </div>
+        {move || {
+            ui.result
+                .with(|result| {
+                    result
+                        .as_ref()
+                        .map(|r| {
+                            (0..r.ligands.len())
+                                .map(|index| {
+                                    view! {
+                                        <button on:click=move |_| {
+                                            ui.task(async move {
+                                                let result = ui
+                                                    .result
+                                                    .get_untracked()
+                                                    .ok_or("Missing result")?;
+                                                save_file(
+                                                        &format!("ligand-{}-parameters.zip", index + 1),
+                                                        &result.ligands[index],
+                                                    )
+                                                    .await
+                                            })
+                                        }>{format!("Save ligand {} parameters", index + 1)}</button>
+                                    }
+                                })
+                                .collect_view()
+                        })
+                })
+        }}
         <a href=api::url("/forcefield/charmm36-feb2026_cgenff-5.0.ff.tgz") download>
             "Download CHARMM36 force field"
         </a>
@@ -223,9 +252,18 @@ async fn run_submission(
         api::bytes("/api/result/assembly.zip", Some(&k)),
         api::bytes("/api/result/system.cif", Some(&k))
     )?;
+    let count = ui
+        .part
+        .with_untracked(|part| part.as_ref().map_or(0, |p| p.ligands.len()));
+    let mut ligands = Vec::with_capacity(count);
+    for index in 0..count {
+        let path = format!("/api/result/ligand-{index}.zip");
+        ligands.push(api::bytes(&path, Some(&k)).await?.into());
+    }
     let result = Download {
         name: format!("{}.zip", plan.project),
         archive: archive.into(),
+        ligands,
         coordinates: coordinates.into(),
     };
     result.preview(ui.viewer);

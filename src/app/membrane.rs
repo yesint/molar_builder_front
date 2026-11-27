@@ -4,13 +4,6 @@ pub(super) fn membrane(ui: Ui) -> impl IntoView {
     let query = RwSignal::new(String::new());
     let family = RwSignal::new(String::new());
     let sub = RwSignal::new(String::new());
-    let update = move |f: Box<dyn FnOnce(&mut Membrane)>| {
-        ui.plan.update(|p| {
-            if let Some(m) = &mut p.membrane {
-                f(m)
-            }
-        })
-    };
     let initial = ui
         .plan
         .get_untracked()
@@ -46,8 +39,9 @@ pub(super) fn membrane(ui: Ui) -> impl IntoView {
                     max=move || ui.plan.with(|p| p.partition.is_none().then_some("12"))
                     step="0.1"
                     value=initial.size_nm
-                    on:input=move |e| update(
-                        Box::new(move |m| m.size_nm = event_target_value(&e).parse().unwrap_or(0.)),
+                    on:input=move |e| update_membrane(
+                        ui,
+                        move |m| m.size_nm = event_target_value(&e).parse().unwrap_or(0.),
                     )
                 />
             </label>
@@ -58,17 +52,19 @@ pub(super) fn membrane(ui: Ui) -> impl IntoView {
                     step="0.1"
                     min="0"
                     value=initial.margin_nm
-                    on:input=move |e| update(
-                        Box::new(move |m| {
+                    on:input=move |e| update_membrane(
+                        ui,
+                        move |m| {
                             m.margin_nm = event_target_value(&e).parse().unwrap_or(-1.);
-                        }),
+                        },
                     )
                 />
             </label>
             <label>
                 "Normalize weights"
-                <select on:change=move |e| update(
-                    Box::new(move |m| m.per_leaflet = event_target_value(&e) == "leaflet"),
+                <select on:change=move |e| update_membrane(
+                    ui,
+                    move |m| m.per_leaflet = event_target_value(&e) == "leaflet",
                 )>
                     <option value="leaflet" selected=initial.per_leaflet>
                         "Per leaflet"
@@ -247,23 +243,25 @@ pub(super) fn membrane(ui: Ui) -> impl IntoView {
                                                             == Some(&id.get_value())
                                                     })
                                             }
-                                            on:change=move |e| update(
-                                                Box::new(move |m| {
+                                            on:change=move |e| update_membrane(
+                                                ui,
+                                                move |m| {
                                                     m.balancing_lipid = input(&e)
                                                         .checked()
                                                         .then(|| id.get_value());
-                                                }),
+                                                },
                                             )
                                         />
                                     </td>
                                     <td>
-                                        <button on:click=move |_| update(
-                                            Box::new(move |m| {
+                                        <button on:click=move |_| update_membrane(
+                                            ui,
+                                            move |m| {
                                                 m.rows.retain(|r| r.id != id.get_value());
                                                 if m.balancing_lipid == Some(id.get_value()) {
                                                     m.balancing_lipid = None;
                                                 }
-                                            }),
+                                            },
                                         )>"Remove"</button>
                                     </td>
                                 </tr>
@@ -300,4 +298,12 @@ pub(super) fn membrane(ui: Ui) -> impl IntoView {
             </p>
         </section>
     }
+}
+
+fn update_membrane(ui: Ui, update: impl FnOnce(&mut Membrane)) {
+    ui.plan.update(|plan| {
+        if let Some(settings) = &mut plan.membrane {
+            update(settings);
+        }
+    });
 }
