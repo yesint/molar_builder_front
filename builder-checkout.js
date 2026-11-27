@@ -24,10 +24,10 @@ export async function sha256(data) {
     n => n.toString(16).padStart(2, "0")).join("");
 }
 
-async function paymentRequest(path, body) {
+async function paymentRequest(path, body, signal) {
   const response = await fetch(api + path, {
     method: "POST", headers: buildHeaders({"Content-Type": "application/json"}),
-    body: JSON.stringify(body), signal: AbortSignal.timeout(60000),
+    body: JSON.stringify(body), signal: AbortSignal.any([signal, AbortSignal.timeout(60000)]),
   });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || "PayPal checkout could not be confirmed.");
@@ -62,16 +62,20 @@ export async function checkoutBuild(makePlan, mode = "paypal-sandbox", {signal, 
   const popup = openPaymentWindow();
   let channel, wake;
   let returned = false;
+  const wait = new AbortController();
   function backToBuilder() {
     returned = true;
     wake?.();
   }
-  function closeCheckout() {
+  function stopWaiting() {
+    wait.abort(new CheckoutDismissed("Checkout closed. Submit again to resume with the same build settings."));
     popup.close();
-    backToBuilder();
+    wake?.();
   }
-  signal?.addEventListener("abort", closeCheckout, {once: true});
+  signal?.addEventListener("abort", stopWaiting, {once: true});
   try {
+    if (signal?.aborted) stopWaiting();
+    wait.signal.throwIfAborted();
     const plan = await makePlan();
     currentPlan = (mode === "paypal-live" ? "molar-live:" : "molar-sandbox:") + await sha256(JSON.stringify(plan));
     currentKey = sessionStorage.getItem(currentPlan);
@@ -79,7 +83,8 @@ export async function checkoutBuild(makePlan, mode = "paypal-sandbox", {signal, 
       currentKey = Array.from(crypto.getRandomValues(new Uint8Array(32)), n => n.toString(16).padStart(2, "0")).join("");
       sessionStorage.setItem(currentPlan, currentKey);
     }
-    const order = await paymentRequest("/checkout", plan);
+    const order = await paymentRequest("/checkout", plan, wait.signal);
+    wait.signal.throwIfAborted();
     if (order.paid) return;
     const url = new URL(order.url);
     const paypalOrigin = mode === "paypal-live" ? "https://www.paypal.com" : "https://www.sandbox.paypal.com";
@@ -89,9 +94,12 @@ export async function checkoutBuild(makePlan, mode = "paypal-sandbox", {signal, 
     channel = new BroadcastChannel("molar-paypal-" + orderId);
     channel.onmessage = ({data}) => {
       if (data !== "return" && data !== "cancel") return;
-      backToBuilder();
       channel.postMessage("received");
-      popup.close();
+      if (data === "cancel") stopWaiting();
+      else {
+        backToBuilder();
+        popup.close();
+      }
       window.focus();
     };
     // An error return from PayPal can omit the order token. The popup keeps
@@ -101,12 +109,13 @@ export async function checkoutBuild(makePlan, mode = "paypal-sandbox", {signal, 
       popup.location.replace(url.href);
     }
     window.addEventListener("focus", backToBuilder, {once: true});
-    if (signal?.aborted) closeCheckout();
     const deadline = Date.now() + 20 * 60 * 1000;
     let confirming = false;
     while (Date.now() < deadline) {
       const checkAfterReturn = returned || popup.closed;
-      const { status } = await paymentRequest("/payment-status", {});
+      wait.signal.throwIfAborted();
+      const { status } = await paymentRequest("/payment-status", {}, wait.signal);
+      wait.signal.throwIfAborted();
       if (status === "paid") return;
       if (status === "awaiting_approval" && checkAfterReturn) {
         throw new CheckoutDismissed("Payment was not approved. You can try again with the same build settings.");
@@ -124,9 +133,12 @@ export async function checkoutBuild(makePlan, mode = "paypal-sandbox", {signal, 
       wake = null;
     }
     throw new Error("Checkout timed out. Submit again to check the same order.");
+  } catch (error) {
+    wait.signal.throwIfAborted();
+    throw error;
   } finally {
     window.removeEventListener("focus", backToBuilder);
-    signal?.removeEventListener("abort", closeCheckout);
+    signal?.removeEventListener("abort", stopWaiting);
     channel?.close();
     popup.close();
   }

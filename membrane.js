@@ -497,12 +497,13 @@ async function prepareBatch({ stage, task, request, assembly }) {
     stage("Waiting for PayPal approval");
     const cancel = $("cancel-checkout");
     const controller = new AbortController();
+    cancel.textContent = "Cancel checkout";
     cancel.hidden = false;
     cancel.onclick = () => controller.abort();
     try {
       await checkoutBuild(() => paymentPlan(assembly), paypalMode, {
         signal: controller.signal,
-        onConfirming() { cancel.hidden = true; stage("Confirming PayPal payment"); },
+        onConfirming() { cancel.textContent = "Stop waiting"; stage("Confirming PayPal payment"); },
       });
     } finally {
       cancel.hidden = true;

@@ -23,13 +23,15 @@ try {
         if (url.endsWith("/checkout")) return Response.json({order_id: order, url: `https://www.sandbox.paypal.com/checkoutnow?token=${order}`});
         polls++;
         // The popup returns before the signed webhook arrives.
-        return Response.json({status: approved ? (polls >= 3 ? "paid" : "pending") : "awaiting_approval"});
+        return Response.json({status: approved ? (polls >= 3 ? "paid" : "pending") :
+          outcome === "cancel" ? "pending" : "awaiting_approval"});
       };
       const job = checkoutBuild(async () => ({test: true}));
       if (!approved) {
         let error;
         try { await job; } catch (cause) { error = cause; }
-        assert(error instanceof CheckoutDismissed && polls === 2, "An unpaid return stops after a fresh status check");
+        assert(error instanceof CheckoutDismissed && polls === (outcome === "cancel" ? 1 : 2),
+          "Cancellation stops a pending checkout immediately, while a normal return checks approval");
       }
       else { await job; assert(polls >= 3, "The return waits for a verified payment"); }
       assert(checkout.closed && iframe.contentWindow.location.hash === "", "Checkout returned to the builder");
@@ -63,7 +65,7 @@ try {
   input("SOPE-outer", "100");
   el("build").click();
   el("continue-solvent").click();
-  let polls = 0, keys = [];
+  let polls = 0, keys = [], status;
   win.open = popup;
   win.fetch = async (url, opts) => {
     if (url.endsWith("/checkout")) {
@@ -72,21 +74,30 @@ try {
     }
     assert(url.endsWith("/payment-status"), "An unpaid submission must not start a build");
     polls++;
-    return Response.json({status: "awaiting_approval"});
+    if (status === "stall") {
+      return new Promise((_, reject) => opts.signal.addEventListener("abort", () => reject(opts.signal.reason), {once: true}));
+    }
+    return Response.json({status});
   };
-  for (const leave of ["return", "cancel button", "focus"]) {
+  for (const leave of ["return", "cancel button", "focus", "cancel at PayPal", "stop waiting", "cancel during request"]) {
     polls = 0;
+    status = leave === "cancel during request" ? "stall" :
+      ["cancel at PayPal", "stop waiting"].includes(leave) ? "pending" : "awaiting_approval";
     el("assemble-system").click();
     await waitFor(() => polls === 1 && !el("cancel-checkout").hidden);
-    if (leave === "cancel button") el("cancel-checkout").click();
+    if (status === "pending") {
+      assert(el("cancel-checkout").textContent === "Stop waiting", "The confirmation wait can still be stopped");
+    }
+    if (leave === "cancel button" || leave === "stop waiting") el("cancel-checkout").click();
     else if (leave === "focus") win.dispatchEvent(new win.Event("focus"));
     else {
       const channel = new BroadcastChannel("molar-paypal-ORDER12345");
-      channel.postMessage("return");
+      channel.postMessage(leave === "return" ? "return" : "cancel");
       channel.close();
     }
     await waitFor(() => !el("assemble-system").disabled);
-    assert(polls === 2 && el("assembly-progress").hidden && el("assembly-log").hidden, "An unpaid return stops polling and clears progress");
+    assert(polls === (["return", "focus"].includes(leave) ? 2 : 1) && el("assembly-progress").hidden && el("assembly-log").hidden,
+      "Leaving checkout stops polling and clears progress");
     assert(el("cancel-checkout").hidden && !el("archive-notice").hidden, "The checkout notice replaces the cancel action");
     assert(el("SOPE-inner").value === "100" && el("SOPE-outer").value === "100", "Checkout preserves the build inputs");
   }
