@@ -18,6 +18,13 @@ const batchReady = () => ready && !preparationPending() && (!$("add-membrane").c
 
 const $ = id => document.getElementById(id);
 $("open-about").addEventListener("click", () => $("about-builder").showModal());
+for (const button of document.querySelectorAll(".stage-heading .help-button")) {
+  button.addEventListener("click", () => {
+    $("stage-help-heading").textContent = button.closest(".stage-heading").querySelector("h2").textContent;
+    $("stage-help-text").textContent = button.dataset.help;
+    $("stage-help").showModal();
+  });
+}
 receiveCheckoutReturn($("checkout-return"));
 let catalogue = [];
 let selectedFamily = null;

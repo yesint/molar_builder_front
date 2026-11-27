@@ -14,7 +14,7 @@
   <main class="membrane-app">
     <header class="app-heading">
       <h1>MolAR builder</h1>
-      <button id="open-about" class="secondary" type="button" aria-label="About MolAR builder" aria-haspopup="dialog" aria-controls="about-builder">?</button>
+      <button id="open-about" class="secondary help-button" type="button" aria-label="About MolAR builder" aria-haspopup="dialog" aria-controls="about-builder">?</button>
     </header>
     <p id="checkout-return" class="notice" role="status" hidden></p>
     <noscript><p class="notice">Enable JavaScript to use MolAR builder.</p></noscript>
@@ -34,7 +34,11 @@
       </aside>
       <div class="project-content">
         <section id="page-load" aria-labelledby="load-heading">
-          <h2 id="load-heading" tabindex="-1">1. Components</h2>
+          <div class="stage-heading">
+            <h2 id="load-heading" tabindex="-1">1. Components</h2>
+            <button class="secondary help-button" type="button" aria-label="Help for Components" aria-haspopup="dialog" aria-controls="stage-help"
+              data-help="Load your files and choose which proteins and other molecules to keep. If you only want a membrane, go straight to the Membrane step.">?</button>
+          </div>
           <div class="protein-layout">
             <div class="protein-controls">
               <div class="protein-toolbar component-files">
@@ -74,7 +78,11 @@
         </section>
 
         <section id="page-proteins" aria-labelledby="proteins-heading" hidden>
-          <h2 id="proteins-heading" tabindex="-1">2. Protein</h2>
+          <div class="stage-heading">
+            <h2 id="proteins-heading" tabindex="-1">2. Protein</h2>
+            <button class="secondary help-button" type="button" aria-label="Help for Protein" aria-haspopup="dialog" aria-controls="stage-help"
+              data-help='Choose any changes you want to make to your protein. If you are adding a membrane, select "Orient" to align the protein with it.'>?</button>
+          </div>
           <div class="protein-layout">
             <div class="protein-controls">
               <fieldset id="protein-options" disabled>
@@ -101,7 +109,11 @@
           </div>
         </section>
         <section id="page-membrane" aria-labelledby="membrane-heading" hidden>
-          <h2 id="membrane-heading" tabindex="-1">4. Membrane</h2>
+          <div class="stage-heading">
+            <h2 id="membrane-heading" tabindex="-1">4. Membrane</h2>
+            <button class="secondary help-button" type="button" aria-label="Help for Membrane" aria-haspopup="dialog" aria-controls="stage-help"
+              data-help='Choose the membrane size and the mix of lipids on each side. To skip the membrane, unselect "Add membrane".'>?</button>
+          </div>
           <label class="protein-check"><input id="add-membrane" type="checkbox" checked> Add membrane</label>
           <div id="no-membrane-actions" class="actions" hidden><button id="continue-no-membrane" type="button">Continue</button></div>
           <p id="no-membrane-note" class="small" hidden>The solute uses a rhombic dodecahedral box.</p>
@@ -166,7 +178,11 @@
             </div>
         </section>
         <section id="page-ligands" aria-labelledby="ligands-heading" hidden>
-          <h2 id="ligands-heading" tabindex="-1">3. Ligands</h2>
+          <div class="stage-heading">
+            <h2 id="ligands-heading" tabindex="-1">3. Ligands</h2>
+            <button class="secondary help-button" type="button" aria-label="Help for Ligands" aria-haspopup="dialog" aria-controls="stage-help"
+              data-help="Review the small molecules you chose. You can edit their atoms and bonds. Make sure each molecule has all its hydrogens before you continue.">?</button>
+          </div>
           <p class="small">All ligand hydrogens must be present; missing hydrogens will cause parameterization to fail.</p>
           <div class="protein-layout">
             <div class="protein-controls">
@@ -184,7 +200,11 @@
           </div>
         </section>
         <section id="page-solvent" aria-labelledby="solvent-heading" hidden>
-          <h2 id="solvent-heading" tabindex="-1">5. Solvent</h2>
+          <div class="stage-heading">
+            <h2 id="solvent-heading" tabindex="-1">5. Solvent</h2>
+            <button class="secondary help-button" type="button" aria-label="Help for Solvent" aria-haspopup="dialog" aria-controls="stage-help"
+              data-help='Choose how much water to add and what type and concentration of salt to use. Select "Neutralize" to balance the total charge. To skip adding water and salt, unselect "Add solvent".'>?</button>
+          </div>
           <fieldset id="assembly-options">
             <label class="protein-check"><input id="add-solvent" type="checkbox" checked> Add solvent</label>
             <fieldset id="solvent-parameters" class="assembly-options">
@@ -199,7 +219,11 @@
           <div class="actions"><button id="continue-solvent" type="button">Continue</button></div>
         </section>
         <section id="page-submit" aria-labelledby="submit-heading" hidden>
-          <h2 id="submit-heading" tabindex="-1">6. Submit</h2>
+          <div class="stage-heading">
+            <h2 id="submit-heading" tabindex="-1">6. Submit</h2>
+            <button class="secondary help-button" type="button" aria-label="Help for Submit" aria-haspopup="dialog" aria-controls="stage-help"
+              data-help="Review your choices and start the build. When it finishes, select Save ZIP to download your files before closing the tab.">?</button>
+          </div>
           <ol id="submit-summary" aria-label="Planned build steps"></ol>
           <p id="assembly-unsaved-warning" class="notice" role="status" hidden>If you reload or close this tab before saving the ZIP, you will lose the result.</p>
           <div class="actions"><button id="assemble-system" type="button" disabled>Submit</button><button id="cancel-checkout" class="secondary" type="button" hidden>Cancel checkout</button><button id="assembly-download" type="button" aria-describedby="assembly-unsaved-warning" hidden>Save ZIP</button><a id="assembly-archive" download="assembly.zip" hidden></a><a id="force-field-download" href="/api/assembly/force-field.zip">Download CHARMM36 / CGenFF force field</a><button id="retry-viewer" type="button" hidden>Retry viewer</button></div>
@@ -211,16 +235,26 @@
       </div>
     </div>
   </main>
+  <dialog id="stage-help" aria-labelledby="stage-help-heading" aria-describedby="stage-help-text">
+    <form method="dialog" class="dialog-title">
+      <h2 id="stage-help-heading" tabindex="-1" autofocus></h2>
+      <button type="submit" class="secondary" aria-label="Close stage help">×</button>
+    </form>
+    <p id="stage-help-text"></p>
+  </dialog>
   <dialog id="about-builder" aria-labelledby="about-heading">
-    <h2 id="about-heading" tabindex="-1" autofocus>About MolAR builder</h2>
-    <p>MolAR builder is an independent, clean-room implementation of workflows similar to those in CHARMM-GUI for preparing systems for molecular dynamics simulations and molecular modeling. The implementation draws on published research and open-source software and uses no CHARMM-GUI source code.</p>
-    <p>The builder uses the <a href="https://github.com/yesint/molar" target="_blank" rel="noopener">molar</a> molecular modeling library and the <a href="https://github.com/yesint/molar_vis" target="_blank" rel="noopener">molar_vis</a> visualizer. The <a href="https://github.com/yesint/molar_builder_front" target="_blank" rel="noopener">frontend is open source</a>. The server backend is currently proprietary.</p>
+    <div class="dialog-title about-title">
+      <h2 id="about-heading" tabindex="-1" autofocus>About MolAR builder</h2>
+      <button type="submit" form="about-actions" class="secondary" aria-label="Close About dialog">×</button>
+    </div>
+    <p>MolAR builder is an independent clean-room implementation of a CHARMM-GUI-like system builder for MD simulations and molecular modeling. It uses no code or copyrighted assets from CHARMM-GUI. The implementation is based entirely on published research papers and open-source resources.</p>
+    <p>Under the hood, the builder uses the <a href="https://github.com/yesint/molar" target="_blank" rel="noopener">molar</a> molecular modeling library and the <a href="https://github.com/yesint/molar_vis" target="_blank" rel="noopener">molar_vis</a> visualizer. The frontend of the service is <a href="https://github.com/yesint/molar_builder_front" target="_blank" rel="noopener">open source</a>. The server backend is currently proprietary.</p>
     <h3>Public beta and payment</h3>
-    <p>MolAR builder is in public beta. Each system submitted to the public service costs <strong>USD 1.00</strong>. The fee helps cover server costs and discourages automated submissions. You need a PayPal account to pay. By confirming payment, you agree to pay this fee for the submitted system. The fee is non-refundable except where applicable law requires a refund.</p>
+    <p>MolAR builder is in public beta. Each system submitted to the public service costs <strong>USD 1.00</strong>. The fee helps cover server costs and discourages automated submissions. You need a PayPal account to pay. By confirming payment, you agree to pay this fee for the submitted system. The fee is non-refundable.</p>
     <h3>Beta participation and warranty</h3>
     <p>Participation in the public beta is voluntary. You use the builder and its output at your own risk. The maintainers provide the service and its output as is, without any express or implied warranty to the extent permitted by law. They cannot guarantee uninterrupted access, individual support, or a fix for a reported problem.</p>
-    <p>You are responsible for checking the generated system before using it in a simulation or publication. The maintainers do not warrant that its coordinates, topology, or parameters are correct or suitable for your research. To the extent permitted by law, they accept no liability for losses arising from use of the service or its output. You retain any rights that applicable law does not allow you to waive.</p>
-    <form method="dialog"><button type="submit" class="secondary compact">Close</button></form>
+    <p>You are responsible for checking the generated system before using it in a simulation or publication. The maintainers do not warrant that its coordinates, topology, or parameters are correct or suitable for your research. To the extent permitted by law, they accept no liability for losses arising from use of the service or its output.</p>
+    <form id="about-actions" method="dialog"><button type="submit" class="secondary compact">Close</button></form>
   </dialog>
   <dialog id="lipid-picker" aria-labelledby="picker-heading">
     <div class="picker-heading"><h2 id="picker-heading">Add lipids</h2><button id="close-picker" class="secondary" aria-label="Close lipid picker">×</button></div>
