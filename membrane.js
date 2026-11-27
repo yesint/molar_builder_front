@@ -9,7 +9,6 @@ import { invalidateAssembly, setAssemblyMembrane, setupAssembly } from "./assemb
 
 let complex = null, assemblyBusy = false, membraneRequest = null, preparationKey = [];
 let balanceSpecies = null;
-let builtMembrane = null;
 const componentsReady = () => !loadState.hasFile || loadState.done;
 const preparationPending = () => !componentsReady() || loadState.busy || proteinState.pending || proteinState.busy || ligandState.pending || ligandState.busy || assemblyBusy;
 
@@ -39,8 +38,6 @@ let proteinAreas = { upper: 0, lower: 0 };
 let busy = false;
 let ready = false;
 let testCheckout = false, paypalMode = null;
-let resultURL = null;
-let unsaved = false;
 let timeoutSeconds = 600;
 const api = `${builderApi}/membrane`;
 const format = value => Number.isFinite(value) ? `${Number(value.toFixed(3))}%` : "—";
@@ -63,16 +60,11 @@ function syncMembraneStep() {
 function invalidate(resetBalance = true, keepConfiguration = false) {
   if (resetBalance) { balanceAdjustment = null; balanceSpecies = null; }
   if (!keepConfiguration) membraneRequest = null;
-  builtMembrane = null; syncMembraneStep();
+  syncMembraneStep();
   normalizedRows = null;
   $("composition-controls").hidden = false;
   $("computation").hidden = true;
   $("built-membrane").hidden = true;
-  clearViewer();
-  $("save-membrane").hidden = true;
-  if (resultURL) URL.revokeObjectURL(resultURL);
-  resultURL = null;
-  unsaved = false;
   showError("");
 }
 
@@ -545,7 +537,7 @@ async function prepareBatch({ stage, task, request, assembly }) {
   $("computation").hidden = false; $("compute-progress").hidden = false;
   try {
     const response = await request(`${api}/compute`, {
-      method: "POST", headers: { "Content-Type": "application/json", "Accept": "multipart/form-data" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout((timeoutSeconds + 30) * 1000),
       body: JSON.stringify({ ...membraneRequest, ...(complex ? { complex_id: complex.complex_id } : {}),
         ...(balanceSpecies ? { balancing_lipid: balanceSpecies } : {}) }),
@@ -554,61 +546,12 @@ async function prepareBatch({ stage, task, request, assembly }) {
       const detail = await response.json().catch(() => ({}));
       throw new Error(detail.error || "The membrane computation failed.");
     }
-    const result = await response.formData(), archive = result.get("archive"), structure = result.get("structure");
-    if (!archive?.size || !structure?.size) throw new Error("The builder returned an incomplete result.");
-    const membraneId = response.headers.get("X-Membrane-ID");
-    if (!membraneId) throw new Error("The server did not retain the membrane. Restart the updated server.");
-    builtMembrane = membraneId;
-    if (resultURL) URL.revokeObjectURL(resultURL);
-    resultURL = URL.createObjectURL(archive); unsaved = true;
-    $("save-membrane").href = resultURL; $("save-membrane").hidden = false;
+    const { membrane_id } = await response.json();
+    if (!membrane_id) throw new Error("The server did not retain the membrane.");
     $("built-membrane").hidden = false;
-    showMembrane(await structure.arrayBuffer());
-    return { membrane_id: membraneId };
+    return { membrane_id };
   } catch (error) { $("composition-controls").hidden = false; throw error; }
   finally { $("computation").hidden = true; $("compute-progress").hidden = true; }
-}
-
-let viewerListener = null;
-let viewerTimer = null;
-function clearViewer() {
-  clearTimeout(viewerTimer);
-  if (viewerListener) window.removeEventListener("message", viewerListener);
-  viewerListener = null;
-  $("membrane-viewer").replaceChildren();
-  delete $("membrane-viewer").dataset.state;
-}
-
-function showMembrane(bytes) {
-  clearViewer();
-  const frame = document.createElement("iframe");
-  frame.title = "Built membrane";
-  frame.src = "./viewer.html";
-  const species = baseCounts.filter(row => row.upper + row.lower
-    + (balanceAdjustment?.id === row.id ? balanceAdjustment.delta : 0) > 0)
-    .map(row => ({ id: row.id, color: speciesColor(row.id) }));
-  viewerListener = event => {
-    if (event.origin !== location.origin || event.source !== frame.contentWindow) return;
-    if (event.data?.type === "ready") {
-      frame.contentWindow.postMessage({ type: "file", mode: "membrane", name: "membrane.cif", bytes, species,
-        proteinSelection: complex?.protein_selection || null,
-        ptms: proteinState.build?.ptmSelection || "",
-        disulfides: proteinState.build?.ssSelection || "",
-        ligandSelection: complex?.ligand_selection || "not all",
-        includeLigands: ligandState.items.length > 0 }, location.origin, [bytes]);
-    } else if (event.data?.type === "rendered") {
-      clearTimeout(viewerTimer);
-      $("membrane-viewer").dataset.state = "rendered";
-      showError("");
-    } else if (["invalid", "unavailable"].includes(event.data?.type)) {
-      clearTimeout(viewerTimer);
-      $("membrane-viewer").dataset.state = "unavailable";
-      showError(event.data.message || "The membrane viewer is unavailable. You can still save the ZIP or edit the membrane.");
-    }
-  };
-  window.addEventListener("message", viewerListener);
-  viewerTimer = setTimeout(() => showError("The membrane viewer did not finish loading. You can still save the ZIP or edit the membrane."), 60000);
-  $("membrane-viewer").append(frame);
 }
 
 $("edit-membrane").addEventListener("click", () => {
@@ -641,15 +584,8 @@ window.addEventListener("hashchange", () => navigate());
 window.addEventListener("keydown", event => { if (event.key === "Escape") $("lipid-hover").hidden = true; });
 window.addEventListener("scroll", () => { $("lipid-hover").hidden = true; }, true);
 window.addEventListener("beforeunload", event => {
-  if (busy || unsaved || proteinState.busy || assemblyBusy) { event.preventDefault(); event.returnValue = ""; }
+  if (busy || proteinState.busy || assemblyBusy) { event.preventDefault(); event.returnValue = ""; }
 });
-$("assembly-download").addEventListener("click", () => {
-  if (!$("assembly-ready").hidden) unsaved = false;
-});
-$("save-membrane").addEventListener("click", () => {
-  unsaved = false;
-});
-
 function updatePreparedSystem() {
   if (assemblyBusy) return;
   const configuration = [loadState.done, proteinState.pending, JSON.stringify(proteinState.request), ligandState.sources, ligandState.pending];

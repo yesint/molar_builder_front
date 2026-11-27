@@ -11,7 +11,7 @@ try {
   const frame = document.getElementById("app");
   await wait(() => frame.contentDocument?.getElementById("add-lipid")?.disabled === false);
   const win = frame.contentWindow, doc = frame.contentDocument, $ = id => doc.getElementById(id);
-  for (const id of ["load-viewer", "protein-viewer", "ligand-viewer", "membrane-viewer"]) new win.MutationObserver(() => {
+  for (const id of ["load-viewer", "protein-viewer", "ligand-viewer"]) new win.MutationObserver(() => {
     for (const child of $(id).querySelectorAll("iframe")) if (child.getAttribute("src") !== "about:blank") { child.onload = () => { child.dataset.stubReady = "yes"; }; child.src = "about:blank"; }
   }).observe($(id), {childList:true});
   let finalViewerMessage;
@@ -180,9 +180,7 @@ try {
     }
     if (url.endsWith("/membrane/compute")) {
       membraneRequest = JSON.parse(options.body);
-      const result = new win.FormData(); result.append("archive",new win.Blob(["ZIP"]),"membrane.zip");
-      result.append("structure",new win.Blob(["data_membrane"]),"membrane.cif");
-      return new win.Response(result,{headers:{"X-Membrane-ID":"membrane"}});
+      return new win.Response(JSON.stringify({membrane_id:"membrane"}));
     }
     if (url.endsWith("/assembly/compute")) { assemblyRequest = JSON.parse(options.body); return new win.Response(new win.Blob(["final ZIP"]),{headers:{"X-Assembly-ID":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}); }
     return originalFetch(url, options);

@@ -252,12 +252,9 @@ try {
   await wait(() => !$("assembly-options").disabled);
   assert($("assembly-error").textContent.includes("Test build failure") && !$("assemble-system").disabled, "Build failure preserves settings and permits retry from Assembly");
   body = null; $("assemble-system").click(); await wait(() => !!body);
-  const result = new win.FormData();
-  result.append("archive", new win.Blob([new Uint8Array([80,75,5,6])]), "membrane.zip");
-  result.append("structure", new win.Blob(["data_membrane"]), "membrane.cif");
-  finish(new win.Response(result, {headers:{"X-Membrane-ID":"built"}}));
+  finish(new win.Response(JSON.stringify({membrane_id:"built"})));
   await wait(() => body.membrane_id === "built");
-  assert($("save-membrane").href.startsWith("blob:") && !$("built-membrane").hidden, "Membrane result is available during the final Assembly task");
+  assert(!$("save-membrane") && !$("membrane-viewer") && $("assembly-download").hidden, "Intermediate coordinates are private");
   assert(charts.innerHTML === chartHTML, "Deferred construction preserves computed charts");
   assert(body.neutralize === true && $("assembly-ready").hidden, "Final assembly consumes the membrane and ion settings");
   finish(new win.Response(new win.Blob(["final ZIP"]),{headers:{"X-Assembly-ID":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}));
@@ -268,7 +265,7 @@ try {
   await wait(() => $("assembly-viewer").dataset.state === "rendered");
   assert(receipts === 1 && structureReads === 1, "The browser acknowledges the stored ZIP and retries the viewer with local coordinates");
   assert(viewerAttempts === 2 && $("assembly-archive").href === download && $("assembly-error").hidden, "Retry renders the saved assembly without another build");
-  assert(!$("assembly-ready").hidden && $("assemble-system").hidden, "Successful final grompp completes Assembly and hides Build");
+  assert(!$("assembly-ready").hidden && $("assemble-system").hidden, "Successful minimization and validation complete Assembly and hides Build");
   assert($("assembly-download") instanceof win.HTMLButtonElement && !$("assembly-unsaved-warning").hidden, "Save ZIP is prominent and shows the unsaved warning");
   const leaving = () => new win.Event("beforeunload", {cancelable:true});
   assert(!win.dispatchEvent(leaving()), "The tab warns before leaving an unsaved build");
@@ -281,12 +278,12 @@ try {
   assert(savedFilename === "assembly.zip" && $("assembly-unsaved-warning").hidden && win.dispatchEvent(leaving()), "Saving the ZIP dismisses the notice and the leave-page warning");
   assert(finalViewerMessage.mode === "assembly" && finalViewerMessage.species.length === 2, "The final viewer receives the assembled system and lipid species colors");
   win.location.hash = "#membrane"; await wait(() => !$("page-membrane").hidden);
-  assert(charts.getBoundingClientRect().height > 0 && $("membrane-viewer").querySelector("iframe"), "Charts and viewer remain available after the batch");
+  assert(charts.getBoundingClientRect().height > 0, "Charts remain available after the batch");
   input("salt-concentration", "0.2");
   assert($("assembly-ready").hidden && $("assembly-download").textContent === "Save previous ZIP", "Ion edits invalidate the current result and preserve its download");
   win.location.hash = "#membrane"; await wait(() => !$("page-membrane").hidden);
   $("edit-membrane").click();
-  assert(!$("composition-controls").hidden && $("built-membrane").hidden && !$("membrane-viewer").children.length, "Edit restores inputs and releases the viewer");
+  assert(!$("composition-controls").hidden && $("built-membrane").hidden, "Edit restores the membrane inputs");
   assert($("POPC-outer").value === "6" && $("POPC-outer-adjustment").textContent === correction, "Edit preserves raw input and balancing correction");
   assert(charts.innerHTML === chartHTML, "Edit preserves chart counts and colors");
   input("cell-size", "7");

@@ -195,7 +195,7 @@ export function invalidateAssembly() {
     if (solvent.neutralize) details.push("neutralize");
     steps.push(["Add solvent and ions", details.join(", ")]);
   }
-  steps.push(["Run final grompp"], ["Load final system"]);
+  steps.push(["Minimize assembled system"], ["Load final system"]);
   $("submit-summary").replaceChildren(...steps.map(([label, detail]) => {
     const row = document.createElement("li"); row.textContent = detail ? `${label} (${detail})` : label; return row;
   }));
