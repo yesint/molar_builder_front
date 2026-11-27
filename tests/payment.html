@@ -69,7 +69,7 @@ try {
       await new Promise(resolve => setTimeout(resolve, 20));
     }
   }
-  await waitFor(() => el("add-lipid")?.disabled === false && el("assemble-system").textContent.includes("Pay USD"));
+  await waitFor(() => el("add-lipid")?.disabled === false && el("assemble-system").textContent.includes("Submit and pay USD"));
   assert(Array.from(el("public-beta-terms").children).every((node, i) =>
     node.isEqualNode(el("submission-fee").children[i])) && el("public-beta-terms").childElementCount === el("submission-fee").childElementCount, "About and Submit show the same beta terms");
   assert(el("assemble-system").textContent.includes("USD 0.50") && el("submission-fee").textContent.includes("USD 0.50"),

@@ -454,7 +454,7 @@ async function connect() {
     if (paypalMode) {
       const amount = health.amount || health.sandbox_amount;
       const price = `${amount.currency_code} ${amount.value}`;
-      $("assemble-system").textContent = `Pay ${price} with PayPal and build`;
+      $("assemble-system").textContent = `Submit and pay ${price} with PayPal`;
       for (const label of document.querySelectorAll("[data-build-price]")) label.textContent = price;
     }
     ready = health.ready === true;
