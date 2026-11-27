@@ -1,6 +1,10 @@
 .membrane-app { max-width: 1480px; }
-.app-heading { display: flex; justify-content: space-between; gap: 24px; align-items: baseline; }
+.app-heading { display: flex; gap: .65rem; align-items: center; }
 .app-heading h1 { margin-bottom: 8px; }
+#open-about { display: grid; place-items: center; width: 1.75rem; height: 1.75rem; padding: 0; border-radius: 50%; line-height: 1; flex: none; }
+#about-builder { width: min(38rem, calc(100% - 2rem)); }
+#about-builder h3 { font-size: 1rem; margin: 1.25rem 0 .25rem; }
+#about-builder h3 + p { margin-top: .25rem; }
 a { color: #275c50; }
 .project-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 24px; align-items: start; }
 .project-tree { padding: 22px 0; }
@@ -161,7 +165,6 @@ dialog::backdrop { background: rgb(20 37 30 / 35%); }
   .picker-choice, .catalog-lipid { overflow-wrap: anywhere; }
   .protein-layout { grid-template-columns: minmax(0, 1fr); }
   .structure-viewer { height: 440px; }
-  .app-heading { display: block; }
   .project-layout { display: block; }
   .project-tree { padding: 0 0 24px; }
   .project-tree h2 { padding-left: 0; }

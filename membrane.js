@@ -17,6 +17,7 @@ const hasSolute = () => proteinState.pending || !!proteinState.request || ligand
 const batchReady = () => ready && !preparationPending() && (!$("add-membrane").checked ? hasSolute() : !!membraneRequest);
 
 const $ = id => document.getElementById(id);
+$("open-about").addEventListener("click", () => $("about-builder").showModal());
 receiveCheckoutReturn($("checkout-return"));
 let catalogue = [];
 let selectedFamily = null;
