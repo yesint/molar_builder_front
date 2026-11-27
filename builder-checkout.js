@@ -1,10 +1,16 @@
 import { builderApi } from "./builder-api.js";
-import { openPaymentWindow } from "./payment.js";
 
 const api = builderApi + "/builder";
 let currentKey = null;
 let currentPlan = null;
 const popupOrderKey = "molar-paypal-return-order";
+
+function openPaymentWindow() {
+  const popup = window.open("about:blank", "_blank", "popup,width=600,height=750");
+  if (!popup) throw new Error("Allow popups to open payment.");
+  popup.opener = null;
+  return popup;
+}
 
 export class CheckoutDismissed extends Error {}
 

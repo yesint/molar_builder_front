@@ -1,14 +1,8 @@
-import init, { StructureFile, System, start_embedded } from "./vendor/molar_vis/molar_vis.js";
+import init, { System, start_embedded } from "./vendor/molar_vis/molar_vis.js";
 
 const $ = id => document.getElementById(id);
 const notify = message => parent.postMessage(message, location.origin);
-let structure;
 let viewer;
-let group;
-let total = 0;
-let navigationTimer;
-let index = 0;
-let changing = false;
 let received = false;
 let proteinView = null;
 let proteinUpdates = Promise.resolve();
@@ -142,46 +136,11 @@ async function updateProteinView(data) {
   if (addedLigand && data.type === "protein-selection") (await viewer.reset_view(0)).free();
 }
 
-async function showMolecule(next) {
-  if (changing) return;
-  changing = true;
-  $("previous").disabled = $("next").disabled = true;
-  try {
-    await group.show(next);
-    const animation = await viewer.reset_view(0);
-    animation.free();
-    await updateNavigation();
-    $("status").hidden = true;
-    notify({ type: "rendered" });
-  } finally {
-    changing = false;
-    $("previous").disabled = index === 0;
-    $("next").disabled = index + 1 === total;
-  }
-}
-
-async function updateNavigation() {
-  index = await group.current();
-  $("position").textContent = `${index + 1} / ${total}`;
-  $("previous").disabled = changing || index === 0;
-  $("next").disabled = changing || index + 1 === total;
-}
-
-// Keep the host controls in sync with the viewer's sidebar and arrow keys.
-async function watchNavigation() {
-  try {
-    if (!changing) await updateNavigation();
-    navigationTimer = setTimeout(watchNavigation, 250);
-  } catch { unavailable(); }
-}
-
 function unavailable(cause) {
   const error = cause?.reason || cause?.error || cause;
   const message = typeof error === "string" ? error : error?.message;
-  clearTimeout(navigationTimer);
   $("status").textContent = message || "Preview unavailable.";
   $("status").hidden = false;
-  $("navigation").hidden = true;
   notify({ type: "unavailable", ...(message ? { message } : {}) });
 }
 
@@ -268,43 +227,7 @@ window.addEventListener("message", async event => {
   }
   if (["membrane", "assembly"].includes(event.data.mode)) {
     await displayBuiltSystem(event.data);
-    return;
   }
-  try {
-    await init();
-    structure = StructureFile.from_bytes(event.data.name, new Uint8Array(event.data.bytes));
-  } catch {
-    notify({ type: "invalid", message: "Cannot read this SDF file." });
-    return;
-  }
-  const counts = { molecules: structure.numMolecules, atoms: structure.numAtoms };
-  if (counts.molecules > 1000 || counts.atoms > 100000) {
-    notify({ type: "invalid", message: "The limit is 1,000 molecules and 100,000 atoms per file." });
-    structure.free();
-    return;
-  }
-  notify({ type: "counts", counts });
-  try {
-    viewer = await start_embedded("molecule");
-    await viewer.set_ui_visibility(false, true);
-    await viewer.set_theme("light");
-    viewer.background(1, 1, 1);
-    group = await viewer.add_file(structure);
-    structure.free();
-    const members = await group.members();
-    total = members.length;
-    for (const member of members) member.free();
-    for (const rep of await group.reps()) {
-      try {
-        rep.style = "ballstick";
-        rep.color = "element";
-        await rep.set_ballstick_bonds(0.5, 0.5);
-      } finally { rep.free(); }
-    }
-    $("navigation").hidden = total < 2;
-    await showMolecule(0);
-    if (total > 1) navigationTimer = setTimeout(watchNavigation, 250);
-  } catch { unavailable(); }
 });
 
 async function displayBuiltSystem(data) {
@@ -354,13 +277,6 @@ async function displayBuiltSystem(data) {
   }
 }
 
-async function navigate(delta) {
-  if (changing) return;
-  const current = await group.current();
-  await showMolecule(Math.max(0, Math.min(total - 1, current + delta)));
-}
-$("previous").addEventListener("click", () => navigate(-1).catch(unavailable));
-$("next").addEventListener("click", () => navigate(1).catch(unavailable));
 const saved = new URLSearchParams(location.hash.slice(1));
 if (parent === window && saved.has("assembly")) {
   try {

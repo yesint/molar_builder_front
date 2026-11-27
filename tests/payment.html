@@ -1,40 +1,10 @@
 <!doctype html><meta charset="utf-8"><title>Payment contract checks</title>
 <script type="module">
 import { CheckoutDismissed, checkoutBuild, completeCheckout } from "../builder-checkout.js";
-import { authorizePayment } from "../payment.js";
 const assert = (value, message) => { if (!value) throw new Error(message); };
-const rejects = async action => { try { await action(); } catch { return; } throw new Error("Expected rejection"); };
-const file = new File(["fixture"], "input.sdf");
 const popup = () => ({closed: false, location: {replace(url) { this.url = url; }}, close() { this.closed = true; }});
 let report;
 try {
-  const grant = await authorizePayment(file, {}, async (path, options) => {
-    assert(path === "/checkout" && options.body === file, "Checkout sends the original file");
-    return {mode: "test", payment_token: "backend-test-grant"};
-  });
-  assert(grant === "backend-test-grant", "Test mode accepts only a server-issued grant");
-  await rejects(() => authorizePayment(file, {}, async () => ({mode: "test", paid: true})));
-  await rejects(() => authorizePayment(file, {}, async () => ({mode: "unknown", payment_token: "ignored"})));
-  const window = popup();
-  let calls = 0;
-  const productionGrant = await authorizePayment(file, {popup: window}, async (path, options) => {
-    if (path === "/checkout") return {mode: "redirect", url: "https://www.sandbox.paypal.com/checkoutnow?token=provider-order", checkout_token: "opaque-checkout"};
-    assert(path === "/payment-status" && options.headers.Authorization === "Bearer opaque-checkout", "Status authenticates to the backend in a header");
-    calls++;
-    return calls === 1 ? {status: "pending", payment_token: "unverified"} : {status: "paid", payment_token: "verified-server-grant"};
-  }, async () => {});
-  assert(calls === 2 && productionGrant === "verified-server-grant", "Pending approval does not authorize computation");
-  assert(window.closed && !window.location.url.includes("opaque-checkout"), "Checkout credentials are not sent in provider URLs");
-  for (const url of ["http://provider.example/", "javascript:alert(1)", "https://user:secret@provider.example/"]) {
-    await rejects(() => authorizePayment(file, {popup: popup()}, async () => ({mode: "redirect", url, checkout_token: "opaque"})));
-  }
-  for (const status of ["cancelled", "expired", "approved", "unknown", "paid"]) {
-    await rejects(() => authorizePayment(file, {popup: popup()}, async path => path === "/checkout"
-      ? {mode: "redirect", url: "https://provider.example/", checkout_token: "opaque"}
-      : {status}));
-  }
-  const closed = popup(); closed.closed = true;
-  await rejects(() => authorizePayment(file, {popup: closed}, async () => ({mode: "redirect", url: "https://provider.example/", checkout_token: "opaque"})));
   const savedOpen = globalThis.open, savedFetch = globalThis.fetch;
   try {
     for (const [outcome, approved] of [["return", true], ["return", false], ["cancel", false]]) {
