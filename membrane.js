@@ -450,7 +450,12 @@ async function connect() {
     if (publicBuilder && paypalMode !== "paypal-live") throw new Error();
     if (paypalMode) {
       const amount = health.amount || health.sandbox_amount;
-      $("assemble-system").textContent = `Pay ${amount.currency_code} ${amount.value} with PayPal and build`;
+      const price = `${amount.currency_code} ${amount.value}`;
+      $("assemble-system").textContent = `Pay ${price} with PayPal and build`;
+      if (paypalMode === "paypal-live") {
+        $("submission-price").textContent = price;
+        $("submission-fee").hidden = false;
+      }
     }
     ready = health.ready === true;
     if (Number.isFinite(health.compute_timeout_seconds)) timeoutSeconds = health.compute_timeout_seconds;
