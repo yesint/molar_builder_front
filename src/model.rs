@@ -170,12 +170,11 @@ impl Membrane {
             }
         } else {
             let values: Vec<_> = rows.iter().flat_map(|r| [r.upper, r.lower]).collect();
-            for (r, v) in rows
-                .iter_mut()
-                .zip(distribute(&values, 100000).chunks_exact(2))
-            {
-                r.upper = v[0] as f64 / 1000.;
-                r.lower = v[1] as f64 / 1000.;
+            let weights = distribute(&values, 100000);
+            let (leaflet_pairs, _) = weights.as_chunks::<2>();
+            for (row, &[upper, lower]) in rows.iter_mut().zip(leaflet_pairs) {
+                row.upper = upper as f64 / 1000.;
+                row.lower = lower as f64 / 1000.;
             }
         }
         rows.retain(|r| r.upper + r.lower > 0.);

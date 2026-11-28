@@ -1,9 +1,7 @@
 name: Check Leptos frontend
 on:
   push:
-    branches: [leptos]
-  pull_request:
-    branches: [leptos]
+    tags: ['leptos-check-*']
 permissions:
   contents: read
 jobs:
