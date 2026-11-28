@@ -38,6 +38,17 @@ async function components(page) {
     await panel.locator('li button').click();
     await page.locator('#partition-system').click();
     await page.locator('#page-ligands').waitFor({state:'visible'});
+    const filter = page.locator('#ligand-resname-search');
+    await filter.fill('missing');
+    assert.equal(await page.locator('#prepared-ligands button').count(), 0);
+    await filter.fill('mol 2');
+    await page.locator('#prepared-ligands button').click();
+    await page.locator('#ligand-viewer[data-state=rendered]').waitFor();
+    await page.locator('#edit-ligand').click();
+    await page.getByRole('button',{name:'Done',exact:true}).click();
+    await page.locator('#parameterize-ligand').click();
+    await page.locator('#page-membrane:visible').waitFor();
+    assert.equal(await page.locator('#ligand-ready').isVisible(),true);
     await page.locator('[data-page=load]').click();
     await page.getByRole('button',{name:'Remove records.sdf'}).click();
     await page.locator('#load-options').waitFor({state:'hidden'});
@@ -94,6 +105,6 @@ async function protein(page) {
         await components(page);
         await protein(page);
         assert.deepEqual(errors,[]);
-        console.log('Components and Protein forms passed');
+        console.log('Components, Protein and Ligands forms passed');
     } finally {await browser.close();}
 })().catch(err=>{console.error(err);process.exitCode=1;});

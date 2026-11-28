@@ -15,6 +15,13 @@ pub(super) struct Download {
 }
 
 impl Download {
+    pub(super) fn has_ligand(&self, index: usize) -> bool {
+        index < self.ligands.len()
+    }
+    pub(super) fn ligand_bytes(&self, index: usize) -> Option<std::sync::Arc<Vec<u8>>> {
+        self.ligands.get(index).cloned()
+    }
+
     pub(super) fn preview(&self, viewer: Viewer) {
         viewer.send(Action::Show(Scene {
             path: String::new(),
@@ -466,21 +473,6 @@ pub(super) fn setup(ui: Ui) {
             r.preview(ui.viewer);
         }
     });
-    on("ligand-download", "click", move |e| {
-        e.prevent_default();
-        let index = ui.ligand.get_untracked();
-        if let Some(r) = ui.result.get_untracked()
-            && let Some(data) = r.ligands.get(index).cloned()
-        {
-            spawn_local(async move {
-                if let Err(e) =
-                    save_file(&format!("ligand-{}-parameters.zip", index + 1), &data).await
-                {
-                    ui.msg.set(e);
-                }
-            });
-        }
-    });
     mount("assembly-log", move || {
         move || {
             let entries = ui.logs.get();
@@ -564,11 +556,6 @@ pub(super) fn setup(ui: Ui) {
         }
 
         visible("retry-viewer", done && !ui.msg.get().is_empty());
-        let ligand = result
-            .as_ref()
-            .is_some_and(|r| ui.ligand.get() < r.ligands.len());
-        visible("ligand-download", ligand);
-        el("ligand-download").set_attribute("href", "#").unwrap();
     });
 }
 fn with_details(label: &str, details: &[String]) -> String {

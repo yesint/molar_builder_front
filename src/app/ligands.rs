@@ -86,7 +86,37 @@ fn render_group(ui: Ui, name: String, copies: Vec<Entry>) -> impl IntoView {
     }
     .into_any()
 }
-pub(super) fn setup(ui: Ui) {
+fn results(ui: Ui, search: RwSignal<String>) -> impl IntoView {
+    move || {
+        let Some(part) = ui.part.get() else {
+            return ().into_any();
+        };
+        let filter = search.get();
+        let mut groups: Vec<(String, String, Vec<Entry>)> = vec![];
+        for (index, (name, label, origin)) in descriptions(ui, &part).into_iter().enumerate() {
+            if !name.to_lowercase().contains(&filter) {
+                continue;
+            }
+            let entry = Entry {
+                index,
+                label,
+                origin: origin.clone(),
+                water: water(&part, index),
+            };
+            if let Some((_, _, items)) = groups
+                .iter_mut()
+                .find(|(o, n, _)| o == &origin && n == &name)
+            {
+                items.push(entry);
+            } else {
+                groups.push((origin, name, vec![entry]));
+            }
+        }
+        paged(groups, move |(_, name, list)| render_group(ui, name, list)).into_any()
+    }
+}
+#[component]
+pub(super) fn LigandsPage(ui: Ui) -> impl IntoView {
     Effect::new(move |_| {
         if ui.editing.get() {
             ui.set_done(2, false);
@@ -94,42 +124,13 @@ pub(super) fn setup(ui: Ui) {
         }
     });
     let search = RwSignal::new(String::new());
-    on("ligand-resname-search", "input", move |_| {
-        search.set(field("ligand-resname-search").value().to_lowercase())
-    });
-    mount("prepared-ligands", move || {
-        move || {
-            let Some(part) = ui.part.get() else {
-                return ().into_any();
-            };
-            let filter = search.get();
-            let mut groups: Vec<(String, String, Vec<Entry>)> = vec![];
-            for (index, (name, label, origin)) in descriptions(ui, &part).into_iter().enumerate() {
-                if !name.to_lowercase().contains(&filter) {
-                    continue;
-                }
-                let entry = Entry {
-                    index,
-                    label,
-                    origin: origin.clone(),
-                    water: water(&part, index),
-                };
-                if let Some((_, _, items)) = groups
-                    .iter_mut()
-                    .find(|(o, n, _)| o == &origin && n == &name)
-                {
-                    items.push(entry);
-                } else {
-                    groups.push((origin, name, vec![entry]));
-                }
-            }
-            paged(groups, move |(_, name, list)| render_group(ui, name, list)).into_any()
-        }
-    });
-    click("edit-ligand", move || {
-        ui.viewer.send(Action::Edit(!ui.editing.get_untracked()))
-    });
-    click("parameterize-ligand", move || {
+    let editable = move || {
+        ui.part.with(|p| {
+            p.as_ref()
+                .is_some_and(|p| (0..p.ligands.len()).any(|i| !water(p, i)))
+        })
+    };
+    let save = move |_| {
         ui.task(async move {
             ui.viewer.save().await?;
             ui.viewer.send(Action::Edit(false));
@@ -137,25 +138,97 @@ pub(super) fn setup(ui: Ui) {
             ui.go(3);
             Ok(())
         })
-    });
-    Effect::new(move |_| {
-        let has = ui.has_ligands();
-        let editable = ui.part.with(|p| {
-            p.as_ref()
-                .is_some_and(|p| p.ligands.iter().enumerate().any(|(i, _)| !water(p, i)))
-        });
-        visible("ligand-viewer", editable);
-        let limit = ui.part.with(|p| p.as_ref().map_or(0, |p| p.ligands.len()));
-        el("ligand-resname-search")
-            .parent_element()
-            .unwrap()
-            .toggle_attribute_with_force("hidden", limit == 0)
-            .unwrap();
-        enabled("parameterize-ligand", has && !ui.busy.get());
-        enabled("edit-ligand", editable && !ui.busy.get());
-        label(
-            "edit-ligand",
-            if ui.editing.get() { "Done" } else { "Edit" },
-        );
-    });
+    };
+    let download = move |e: leptos::ev::MouseEvent| {
+        e.prevent_default();
+        let i = ui.ligand.get_untracked();
+        if let Some(bytes) = ui.result.with_untracked(|r| r.as_ref()?.ligand_bytes(i)) {
+            spawn_local(async move {
+                if let Err(e) =
+                    checkout::save_file(&format!("ligand-{}-parameters.zip", i + 1), &bytes).await
+                {
+                    ui.msg.set(e);
+                }
+            });
+        }
+    };
+    view! {
+        <div class="stage-heading">
+            <h2 id="ligands-heading" tabindex="-1">
+                "3. Ligands"
+            </h2>
+            <button
+                class="secondary help-button"
+                type="button"
+                aria-label="Help for Ligands"
+                aria-haspopup="dialog"
+                aria-controls="stage-help"
+                data-help="Review the small molecules you chose. You can edit their atoms and bonds. Make sure each molecule has all its hydrogens before you continue."
+            >
+                "?"
+            </button>
+        </div>
+        <p class="small">
+            "All ligand hydrogens must be present; missing hydrogens will cause parameterization to fail."
+        </p>
+        <div class="protein-layout">
+            <div class="protein-controls">
+                <label hidden=move || {
+                    !ui.has_ligands()
+                }>
+                    "Search by resname "
+                    <input
+                        id="ligand-resname-search"
+                        type="search"
+                        on:input=move |e| search.set(event_target_value(&e).to_lowercase())
+                    />
+                </label>
+                <div id="prepared-ligands">{results(ui, search)}</div>
+                <div class="actions">
+                    <button
+                        id="edit-ligand"
+                        class="secondary"
+                        type="button"
+                        disabled=move || !editable() || ui.busy.get()
+                        on:click=move |_| ui.viewer.send(Action::Edit(!ui.editing.get_untracked()))
+                    >
+                        {move || if ui.editing.get() { "Done" } else { "Edit" }}
+                    </button>
+                    <button
+                        id="parameterize-ligand"
+                        type="button"
+                        disabled=move || !ui.has_ligands() || ui.busy.get()
+                        on:click=save
+                    >
+                        "Continue"
+                    </button>
+                    <a
+                        id="ligand-download"
+                        href="#"
+                        hidden=move || {
+                            !ui
+                                .result
+                                .with(|r| r.as_ref().is_some_and(|r| r.has_ligand(ui.ligand.get())))
+                        }
+                        on:click=download
+                    >
+                        "Download parameters"
+                    </a>
+                </div>
+                <div id="ligand-progress" role="status" hidden>
+                    <progress></progress>
+                    " Parameterizing…"
+                </div>
+                <p
+                    id="ligand-error"
+                    class="error"
+                    role="alert"
+                    hidden=move || ui.msg.with(String::is_empty)
+                >
+                    {move || ui.msg.get()}
+                </p>
+            </div>
+            <div id="ligand-viewer" class="structure-viewer" hidden=move || !editable()></div>
+        </div>
+    }
 }

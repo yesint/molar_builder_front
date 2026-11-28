@@ -225,7 +225,10 @@ fn setup(ui: Ui) {
         "page-proteins",
         move || view! { <protein::ProteinPage ui /> },
     );
-    ligands::setup(ui);
+    mount(
+        "page-ligands",
+        move || view! { <ligands::LigandsPage ui /> },
+    );
     membrane::setup(ui);
     solvent::setup(ui);
     checkout::setup(ui);
@@ -313,7 +316,7 @@ fn setup(ui: Ui) {
         }
     });
     Effect::new(move |_| {
-        if ui.stage.get() < 2 {
+        if ui.stage.get() < 3 {
             return;
         }
         let id = [
