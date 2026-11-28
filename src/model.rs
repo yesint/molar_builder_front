@@ -1,13 +1,17 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Lipid {
     pub id: String,
     pub name: String,
     pub family: String,
     pub subfamily: String,
-    pub area_nm2: f32,
+    #[serde(default)]
+    pub chemical_subfamily: String,
+    #[serde(default)]
+    pub group: String,
+    pub area_nm2: f64,
     pub image: String,
     pub tails: String,
 }
@@ -70,8 +74,8 @@ impl Default for Plan {
                 balancing_lipid: None,
             }),
             solvent: Some(Solvent {
-                waters_per_lipid: 40.,
-                clearance_nm: 1.5,
+                waters_per_lipid: 50.,
+                clearance_nm: 1.,
                 salt: "NaCl".into(),
                 concentration: 0.15,
                 neutralize: true,
@@ -98,6 +102,8 @@ pub struct Partition {
     pub id: String,
     pub protein: Value,
     pub ligands: Vec<String>,
+    #[serde(default)]
+    pub ligand_details: Vec<serde_json::Value>,
 }
 
 fn distribute(values: &[f64], units: u32) -> Vec<u32> {
@@ -125,6 +131,9 @@ impl Membrane {
         {
             return Err("Enter a cell length of at least 3 nm and a nonnegative XY margin.".into());
         }
+        if self.rows.is_empty() {
+            return Err("Add at least one lipid species.".into());
+        }
         let mut seen = std::collections::HashSet::new();
         for r in &self.rows {
             if !catalogue.iter().any(|l| l.id == r.id)
@@ -136,8 +145,13 @@ impl Membrane {
                 );
             }
         }
-        if !self.rows.iter().any(|r| r.upper > 0.) || !self.rows.iter().any(|r| r.lower > 0.) {
-            return Err("Both leaflets need a positive weight.".into());
+        for (side, has_weight) in [
+            ("outer", self.rows.iter().any(|r| r.upper > 0.)),
+            ("inner", self.rows.iter().any(|r| r.lower > 0.)),
+        ] {
+            if !has_weight {
+                return Err(format!("Add a positive percentage to the {side} leaflet."));
+            }
         }
         let mut rows = self.rows.clone();
         if self.per_leaflet {
@@ -177,13 +191,29 @@ impl Membrane {
         }
         Ok(rows)
     }
-    pub fn estimates(&self, catalogue: &[Lipid]) -> Result<Vec<(Row, u32, u32)>, String> {
+    pub fn estimates(
+        &self,
+        catalogue: &[Lipid],
+        geometry: &Value,
+    ) -> Result<Vec<(Row, u32, u32)>, String> {
         let rows = self.normalized(catalogue)?;
         let areas: Vec<_> = rows
             .iter()
-            .map(|r| catalogue.iter().find(|l| l.id == r.id).unwrap().area_nm2)
+            .map(|r| catalogue.iter().find(|l| l.id == r.id).unwrap().area_nm2 as f32)
             .collect();
-        let area = (self.size_nm as f32) * (self.size_nm as f32 * 120f32.to_radians().sin());
+        let size = match geometry["xy_diameter_nm"].as_f64() {
+            Some(diameter) => self
+                .size_nm
+                .max(((diameter + 2. * self.margin_nm) / (3f64.sqrt() / 2.) * 10.).ceil() / 10.)
+                .max(geometry["minimum_cell_size_nm"].as_f64().unwrap_or(0.)),
+            None => self.size_nm,
+        } as f32;
+        let area = size * (size * 120f32.to_radians().sin());
+        let free =
+            |side: &str| area - geometry["protein_areas"][side].as_f64().unwrap_or(0.) as f32;
+        if free("upper") <= 0. || free("lower") <= 0. {
+            return Err("The protein occupies the entire cell area in a leaflet.".into());
+        }
         let allocate = |weights: Vec<f32>, surface: f32| {
             let total: f32 = weights.iter().sum();
             let mean = weights
@@ -208,9 +238,12 @@ impl Membrane {
         let upper = rows.iter().map(|r| r.upper as f32).collect::<Vec<_>>();
         let lower = rows.iter().map(|r| r.lower as f32).collect::<Vec<_>>();
         let (up, lo) = if self.per_leaflet {
-            (allocate(upper, area), allocate(lower, area))
+            (
+                allocate(upper, free("upper")),
+                allocate(lower, free("lower")),
+            )
         } else {
-            let mut all = allocate([upper, lower].concat(), 2. * area);
+            let mut all = allocate([upper, lower].concat(), free("upper") + free("lower"));
             let lo = all.split_off(rows.len());
             (all, lo)
         };

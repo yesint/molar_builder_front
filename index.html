@@ -1,13 +1,354 @@
 <!doctype html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>MolAR Builder</title>
-    <link data-trunk rel="rust">
-    <link data-trunk rel="css" href="style.css">
-    <link data-trunk rel="copy-dir" href="membrane-assets">
-    <link data-trunk rel="copy-file" href="molar-vis-LICENSE">
+  <meta charset="utf-8">
+  <meta name="referrer" content="no-referrer">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="MolAR builder">
+  <title>MolAR builder</title>
+  <link data-trunk rel="css" href="./style.css">
+  <link data-trunk rel="css" href="./membrane.css">
+  <link data-trunk rel="rust">
+  <link data-trunk rel="copy-dir" href="membrane-assets">
+  <link data-trunk rel="copy-file" href="molar-vis-LICENSE">
 </head>
-<body></body>
+<body>
+  <main class="membrane-app">
+    <header class="app-heading">
+      <h1>MolAR builder</h1>
+      <button id="open-about" class="secondary help-button" type="button" aria-label="About MolAR builder" aria-haspopup="dialog" aria-controls="about-builder">?</button>
+    </header>
+    <p id="checkout-return" class="notice" role="status" hidden></p>
+    <noscript><p class="notice">Enable JavaScript to use MolAR builder.</p></noscript>
+    <div class="project-layout">
+      <aside class="project-tree">
+        <h2>Project</h2>
+        <nav aria-label="Project sections">
+          <ul>
+            <li><a href="#load" data-page="load" aria-current="page">1. Components <span id="load-ready" class="tree-check" aria-label="Complete" hidden>✓</span></a></li>
+            <li><a aria-disabled="true" data-page="proteins">2. Protein <span id="protein-ready" class="tree-check" aria-label="Complete" hidden>✓</span></a></li>
+            <li><a aria-disabled="true" data-page="ligands">3. Ligands <span id="ligand-ready" class="tree-check" aria-label="Complete" hidden>✓</span></a></li>
+            <li><a href="#membrane" data-page="membrane">4. Membrane <span id="membrane-ready" class="tree-check" aria-label="Complete" hidden>✓</span></a></li>
+            <li><a href="#solvent" data-page="solvent">5. Solvent <span id="solvent-ready" class="tree-check" aria-label="Complete" hidden>✓</span></a></li>
+            <li><a href="#submit" data-page="submit">6. Submit <span id="assembly-ready" class="tree-check" aria-label="Complete" hidden>✓</span></a></li>
+          </ul>
+        </nav>
+      </aside>
+      <div class="project-content">
+        <section id="page-load" aria-labelledby="load-heading">
+          <div class="stage-heading">
+            <h2 id="load-heading" tabindex="-1">1. Components</h2>
+            <button class="secondary help-button" type="button" aria-label="Help for Components" aria-haspopup="dialog" aria-controls="stage-help"
+              data-help="Load your files and choose which proteins and other molecules to keep. If you only want a membrane, go straight to the Membrane step.">?</button>
+          </div>
+          <div class="protein-layout">
+            <div class="protein-controls">
+              <div class="protein-toolbar component-files">
+                <button id="load-structure" type="button">Load...</button>
+                <input id="structure-file" type="file" accept=".pdb,.cif,.mmcif,.sdf,.sd" multiple hidden>
+                <span id="structure-filename" class="small"></span>
+                <button id="add-ligand-files" type="button" class="secondary">Add ligands...</button>
+                <input id="ligand-files" type="file" accept=".pdb,.cif,.mmcif,.sdf,.sd" multiple hidden>
+                <span id="ligand-filenames" class="small"></span>
+              </div>
+              <fieldset id="load-options" hidden disabled>
+                <div class="protein-section" id="load-protein-section"><h3>Protein</h3>
+                  <div class="component-tabs" role="tablist" aria-label="Protein selection">
+                    <button id="protein-chains-tab" type="button" role="tab" aria-selected="true" aria-controls="protein-chains-panel">Choose</button>
+                    <button id="protein-custom-tab" type="button" role="tab" aria-selected="false" aria-controls="protein-custom-panel" tabindex="-1">Custom selection</button>
+                  </div>
+                  <div id="protein-chains-panel" role="tabpanel" aria-labelledby="protein-chains-tab"><div id="load-chains"></div></div>
+                  <div id="protein-custom-panel" role="tabpanel" aria-labelledby="protein-custom-tab" hidden></div>
+                </div>
+                <div class="protein-section"><h3>Ligands</h3>
+                  <div class="component-tabs" role="tablist" aria-label="Ligand selection">
+                    <button id="ligand-residues-tab" type="button" role="tab" aria-selected="true" aria-controls="ligand-residues-panel">Choose</button>
+                    <button id="ligand-custom-tab" type="button" role="tab" aria-selected="false" aria-controls="ligand-custom-panel" tabindex="-1">Custom selection</button>
+                  </div>
+                  <div id="ligand-residues-panel" role="tabpanel" aria-labelledby="ligand-residues-tab">
+                    <div class="component-ligand-list" id="load-ligands"></div>
+                  </div>
+                  <div id="ligand-custom-panel" role="tabpanel" aria-labelledby="ligand-custom-tab" hidden></div>
+                </div>
+              </fieldset>
+              <div class="actions" id="load-actions" hidden><button id="partition-system" type="button">Continue</button></div>
+              <p id="load-status" role="status" hidden></p><progress id="load-progress" hidden></progress>
+              <p id="load-error" class="error" role="alert" hidden></p>
+            </div>
+            <div id="load-viewer" hidden class="structure-viewer" aria-label="Loaded structure"></div>
+          </div>
+        </section>
+
+        <section id="page-proteins" aria-labelledby="proteins-heading" hidden>
+          <div class="stage-heading">
+            <h2 id="proteins-heading" tabindex="-1">2. Protein</h2>
+            <button class="secondary help-button" type="button" aria-label="Help for Protein" aria-haspopup="dialog" aria-controls="stage-help"
+              data-help='Choose any changes you want to make to your protein. If you are adding a membrane, select "Orient" to align the protein with it.'>?</button>
+          </div>
+          <div class="protein-layout">
+            <div class="protein-controls">
+              <fieldset id="protein-options" disabled>
+                <div class="protein-section">
+                  <div class="protein-section-heading"><h3>PTMs</h3><button id="add-ptm" class="secondary compact" type="button">Add...</button></div>
+                  <div id="protein-ptms"></div>
+                </div>
+                <div class="protein-section">
+                  <div class="protein-section-heading"><h3>Mutations</h3><button id="add-mutation" class="secondary compact" type="button">Add...</button></div>
+                  <div id="protein-mutations"></div>
+                </div>
+                <div class="protein-section">
+                  <div class="protein-section-heading"><h3>SS bonds</h3><button id="add-ss" class="secondary compact" type="button">Add...</button></div>
+                  <div id="protein-ss"></div>
+                </div>
+                <label class="protein-check"><input id="orient-protein" type="checkbox" checked> Orient</label>
+                <div class="actions"><button id="build-protein" type="button" disabled>Continue</button><span id="protein-built" class="tree-check" role="status" hidden>✓</span></div>
+              </fieldset>
+              <p id="protein-status" role="status" hidden></p>
+              <progress id="protein-progress" hidden></progress>
+              <p id="protein-error" class="error" role="alert" hidden></p>
+            </div>
+            <div id="protein-viewer" class="structure-viewer" aria-label="Protein structure"></div>
+          </div>
+        </section>
+        <section id="page-membrane" aria-labelledby="membrane-heading" hidden>
+          <div class="stage-heading">
+            <h2 id="membrane-heading" tabindex="-1">4. Membrane</h2>
+            <button class="secondary help-button" type="button" aria-label="Help for Membrane" aria-haspopup="dialog" aria-controls="stage-help"
+              data-help='Choose the membrane size and the mix of lipids on each side. To skip the membrane, unselect "Add membrane".'>?</button>
+          </div>
+          <label class="protein-check"><input id="add-membrane" type="checkbox" checked> Add membrane</label>
+          <div id="no-membrane-actions" class="actions" hidden><button id="continue-no-membrane" type="button">Continue</button></div>
+          <p id="no-membrane-note" class="small" hidden>The solute uses a rhombic dodecahedral box.</p>
+            <div id="membrane-composition" class="composition-layout">
+            <div class="composition-editor">
+            <fieldset id="composition-controls">
+            <legend class="sr-only">Membrane composition</legend>
+            <p id="protein-area-note" class="small">During the build, the protein area is subtracted from each leaflet before lipid counts are calculated.</p>
+            <p id="composition-estimate" class="small" hidden>Estimated counts and lipid areas from the entered cell size, without protein area.</p>
+            <div class="composition-scroll">
+              <table class="composition">
+                <thead><tr><th scope="col">Lipid species</th><th scope="col">Inner <span class="small column-help">Input → Normalized (lipids)</span></th><th scope="col">Outer <span class="small column-help">Input → Normalized (lipids)</span></th><th scope="col"><span class="sr-only">Remove</span></th></tr></thead>
+                <tbody id="lipid-rows"></tbody>
+                <tfoot><tr><th scope="row">Total</th><td><div class="percentage-count"><span id="inner-total" class="normalized-percentage"></span><span id="inner-total-count" class="lipid-count"></span></div></td><td><div class="percentage-count"><span id="outer-total" class="normalized-percentage"></span><span id="outer-total-count" class="lipid-count"></span></div></td><td></td></tr>
+                <tr id="area-row"><th scope="row">
+                  <div class="area-tools"><strong>Area <span class="small">(nm²)</span></strong>
+                    <div id="balance-controls" hidden>
+                      <label for="balancing-lipid" class="sr-only">Balancing lipid</label>
+                      <select id="balancing-lipid"></select>
+                      <button id="balance" class="secondary" type="button">Balance</button>
+                    </div>
+                  </div>
+                </th><td class="area-value"><span id="inner-area">—</span></td>
+                <td class="area-value"><span id="outer-area">—</span></td><td></td></tr></tfoot>
+              </table>
+            </div>
+            <button id="add-lipid" class="secondary" type="button" disabled><span aria-hidden="true">+</span> Add lipids</button>
+            <fieldset class="normalization">
+              <legend class="sr-only">Normalize percentages</legend>
+              <div class="normalization-options">
+                <label><input id="per-leaflet" type="radio" name="normalization" value="leaflet" checked> 100% per leaflet</label>
+                <label><input id="per-membrane" type="radio" name="normalization" value="total"> 100% per membrane</label>
+              </div>
+              <p id="combined-total" class="small" hidden></p>
+            </fieldset>
+            <div class="cell-size">
+              <label for="cell-size">Hexagonal cell length (nm)</label>
+              <input id="cell-size" type="number" value="6" min="3" max="12" step="0.1" required>
+            </div>
+            <div class="cell-size"><label for="xy-margin">Minimum XY margin (nm)</label><input id="xy-margin" type="number" value="1" min="0" step="0.1" required></div>
+            <p id="resolved-cell" class="small"></p>
+            <div class="actions"><button id="build" disabled>Continue</button></div>
+            </fieldset>
+            <div id="computation" hidden>
+              <p id="compute-status" role="status">Building membrane…</p>
+              <progress id="compute-progress" aria-label="Building the membrane"></progress>
+            </div>
+            <div id="built-membrane" hidden>
+              <div class="actions">
+                <button id="edit-membrane" type="button">Edit...</button>
+              </div>
+            </div>
+            <p id="composition-error" class="error" role="alert" hidden></p>
+            <p id="connection" class="error" role="status" hidden></p>
+            </div>
+            <aside class="leaflet-charts" aria-label="Lipid counts by leaflet">
+              <figure><figcaption>Inner</figcaption><svg id="inner-pie" viewBox="0 0 200 200" role="img" aria-label="Inner lipid counts"></svg><ul id="inner-legend" class="pie-legend"></ul></figure>
+              <figure><figcaption>Outer</figcaption><svg id="outer-pie" viewBox="0 0 200 200" role="img" aria-label="Outer lipid counts"></svg><ul id="outer-legend" class="pie-legend"></ul></figure>
+            </aside>
+            </div>
+        </section>
+        <section id="page-ligands" aria-labelledby="ligands-heading" hidden>
+          <div class="stage-heading">
+            <h2 id="ligands-heading" tabindex="-1">3. Ligands</h2>
+            <button class="secondary help-button" type="button" aria-label="Help for Ligands" aria-haspopup="dialog" aria-controls="stage-help"
+              data-help="Review the small molecules you chose. You can edit their atoms and bonds. Make sure each molecule has all its hydrogens before you continue.">?</button>
+          </div>
+          <p class="small">All ligand hydrogens must be present; missing hydrogens will cause parameterization to fail.</p>
+          <div class="protein-layout">
+            <div class="protein-controls">
+              <label hidden>Search by resname <input id="ligand-resname-search" type="search"></label>
+              <div id="prepared-ligands"></div>
+              <div class="actions">
+                <button id="edit-ligand" class="secondary" type="button" disabled>Edit</button>
+                <button id="parameterize-ligand" type="button" disabled>Continue</button>
+                <a id="ligand-download" hidden>Download parameters</a>
+              </div>
+              <div id="ligand-progress" role="status" hidden><progress></progress> Parameterizing…</div>
+              <p id="ligand-error" class="error" role="alert" hidden></p>
+            </div>
+            <div id="ligand-viewer" class="structure-viewer" hidden></div>
+          </div>
+        </section>
+        <section id="page-solvent" aria-labelledby="solvent-heading" hidden>
+          <div class="stage-heading">
+            <h2 id="solvent-heading" tabindex="-1">5. Solvent</h2>
+            <button class="secondary help-button" type="button" aria-label="Help for Solvent" aria-haspopup="dialog" aria-controls="stage-help"
+              data-help='Choose how much water to add and what type and concentration of salt to use. Select "Neutralize" to balance the total charge. To skip adding water and salt, unselect "Add solvent".'>?</button>
+          </div>
+          <fieldset id="assembly-options">
+            <label class="protein-check"><input id="add-solvent" type="checkbox" checked> Add solvent</label>
+            <fieldset id="solvent-parameters" class="assembly-options">
+              <label id="waters-per-lipid-label" for="waters-per-lipid">Water molecules per lipid</label><input id="waters-per-lipid" type="number" min="1" step="1" value="50" required>
+              <label for="water-clearance">Water clearance beyond protein (nm)</label><input id="water-clearance" type="number" min="0" step="0.1" value="1" required>
+              <label for="assembly-salt">Salt</label><select id="assembly-salt"><option>NaCl</option><option>KCl</option><option>CaCl2</option><option>MgCl2</option></select>
+              <label for="salt-concentration">Concentration (mol/L)</label><input id="salt-concentration" type="number" min="0" step="0.01" value="0.15" required>
+              <label class="protein-check"><input id="neutralize-system" type="checkbox" checked> Neutralize</label>
+            </fieldset>
+          </fieldset>
+          <p id="assembly-box" class="small"></p>
+          <div class="actions"><button id="continue-solvent" type="button">Continue</button></div>
+        </section>
+        <section id="page-submit" aria-labelledby="submit-heading" hidden>
+          <div class="stage-heading">
+            <h2 id="submit-heading" tabindex="-1">6. Submit</h2>
+            <button class="secondary help-button" type="button" aria-label="Help for Submit" aria-haspopup="dialog" aria-controls="stage-help"
+              data-help="Review your choices and start the build. When it finishes, select Save ZIP to download your files before closing the tab.">?</button>
+          </div>
+          <ol id="submit-summary" aria-label="Planned build steps"></ol>
+          <div id="submission-fee" class="notice"></div>
+          <div class="actions">
+            <button id="assemble-system" type="button" disabled>Submit</button>
+            <button id="cancel-checkout" class="secondary" type="button" hidden>Cancel checkout</button>
+            <p id="assembly-unsaved-warning" class="notice" role="status" hidden>If you reload or close this tab before saving the ZIP, you will lose the result.</p>
+            <button id="assembly-download" type="button" aria-describedby="assembly-unsaved-warning" hidden>Save ZIP</button>
+            <a id="assembly-archive" download="assembly.zip" hidden></a>
+            <a id="force-field-download" href="/api/assembly/force-field.zip">Download CHARMM36 / CGenFF force field</a>
+            <button id="retry-viewer" type="button" hidden>Retry viewer</button>
+          </div>
+          <p id="archive-notice" role="status" hidden></p>
+          <p id="assembly-status" class="sr-only" role="status" hidden></p><ol id="assembly-log" class="build-log" tabindex="0" aria-label="Build stages" aria-live="polite" hidden></ol><p id="build-total" hidden>Total build time: <time id="build-duration"></time></p><progress id="assembly-progress" hidden></progress>
+          <p id="assembly-error" class="error" role="alert" hidden></p>
+          <div id="assembly-viewer" class="structure-viewer" aria-label="Assembled system" hidden></div>
+        </section>
+      </div>
+    </div>
+  </main>
+  <dialog id="stage-help" aria-labelledby="stage-help-heading" aria-describedby="stage-help-text">
+    <form method="dialog" class="dialog-title">
+      <h2 id="stage-help-heading" tabindex="-1" autofocus></h2>
+      <button type="submit" class="secondary" aria-label="Close stage help">×</button>
+    </form>
+    <p id="stage-help-text"></p>
+  </dialog>
+  <dialog id="about-builder" aria-labelledby="about-heading">
+    <div class="dialog-title about-title">
+      <h2 id="about-heading" tabindex="-1" autofocus>About MolAR builder</h2>
+      <button type="submit" form="about-actions" class="secondary" aria-label="Close About dialog">×</button>
+    </div>
+    <p>MolAR builder is an independent clean-room implementation of a CHARMM-GUI-like system builder for MD simulations and molecular modeling. It uses no code or copyrighted assets from CHARMM-GUI. The implementation is based entirely on published research papers and open-source resources.</p>
+    <p>Under the hood, the builder uses the <a href="https://github.com/yesint/molar" target="_blank" rel="noopener">molar</a> molecular modeling library and the <a href="https://github.com/yesint/molar_vis" target="_blank" rel="noopener">molar_vis</a> visualizer. The frontend of the service is <a href="https://github.com/yesint/molar_builder_front" target="_blank" rel="noopener">open source</a>. The server backend is currently proprietary.</p>
+    <div id="public-beta-terms">
+      <h3>Public beta</h3>
+      <p>MolAR builder is in public beta. To discourage automated submissions and cover server costs, each submitted system costs <strong data-build-price>USD 0.50</strong>. This fee is your contribution as a volunteer beta tester. No particular result is guaranteed. No payment credentials are collected or stored by MolAR builder.</p>
+      <p>By clicking “Submit”, you agree to use the builder and its output at your own risk. Both are provided without warranty of any kind, to the extent permitted by law.</p>
+      <p>Generated systems are free to use for any purpose under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Data will be used to debug the builder and may also be used to train AI models.</p>
+      <p>If you don’t agree with these terms, do not press “Submit”.</p>
+    </div>
+    <form id="about-actions" method="dialog"><button type="submit" class="secondary compact">Close</button></form>
+  </dialog>
+  <dialog id="lipid-picker" aria-labelledby="picker-heading">
+    <div class="picker-heading"><h2 id="picker-heading">Add lipids</h2><button id="close-picker" class="secondary" aria-label="Close lipid picker">×</button></div>
+    <label for="lipid-search">Search by family, subfamily, molecule, or tail composition</label>
+    <input id="lipid-search" type="search" placeholder="e.g. POPC or 18:0" autocomplete="off">
+    <div class="picker-scroll"><div class="picker-layout">
+      <div class="picker-column"><h3>Family</h3><div id="lipid-families" role="group" aria-label="Lipid family"></div></div>
+      <div class="picker-column"><h3>Subfamily</h3><div id="lipid-subfamilies" role="group" aria-label="Lipid subfamily"></div></div>
+      <div class="picker-column"><h3>Molecules</h3><div id="picker-lipids" role="group" aria-label="Molecules"></div></div>
+      <aside class="structure-preview" aria-label="Lipid chemical structure">
+        <h3>Picture</h3>
+        <div id="preview-content" hidden>
+        <h4 id="preview-name"></h4><p id="preview-tails" class="small"></p>
+        <img id="preview-image" alt="" width="180" height="350">
+        <p id="preview-error" class="small" hidden>The structure image could not be loaded.</p>
+        </div>
+      </aside>
+    </div></div>
+    <p id="no-lipids" role="status" hidden>No lipids match your search.</p>
+  </dialog>
+  <aside id="lipid-hover" class="hover-structure" hidden><strong></strong><img alt=""></aside>
+  <dialog id="mutation-picker">
+      <form id="mutation-form">
+        <h2>Mutate residue</h2>
+        <label>Search residues <input id="mutation-search" type="search"></label>
+        <label>Residue <select id="mutation-residue"></select></label>
+        <label>Mutate to <select id="mutation-target"></select></label>
+        <div class="actions"><button type="submit">Apply</button><button type="button" class="secondary" data-close="mutation-picker">Cancel</button></div>
+      </form>
+    </dialog>
+    <dialog id="ptm-picker" aria-labelledby="ptm-heading">
+    <h2 id="ptm-heading">Add PTM</h2>
+    <form id="ptm-form">
+      <label for="ptm-type">PTM type</label><select id="ptm-type" required><option value="phosphorylation">Phosphorylation</option><option value="palmitoylation">Lipidation: Cys S-palmitoylation</option><option value="glycine_myristoylation">Lipidation: N-terminal Gly myristoylation</option><option value="lysine_myristoylation">Lipidation: Lys myristoylation</option><option value="farnesylation">Lipidation: Cys farnesylation</option><option value="geranylgeranylation">Lipidation: Cys geranylgeranylation</option><option value="triacylation">Lipidation: N-terminal Cys triacylation</option><option value="glycosylation">Glycosilation</option></select>
+      <label for="ptm-search">Search residues</label><input id="ptm-search" type="search" placeholder="Residue number, chain or name">
+      <label for="ptm-residue">Residue</label><select id="ptm-residue" required></select>
+      <p id="ptm-empty" class="small" hidden>No eligible residues.</p>
+      <label id="ptm-charge-label" for="ptm-charge">Charge</label><select id="ptm-charge"><option value="-2">−2</option><option value="-1">−1</option></select>
+      <div class="actions"><button id="ptm-add" type="submit">Add</button><button class="secondary" type="button" data-close="ptm-picker">Cancel</button></div>
+    </form>
+  </dialog>
+  <dialog id="glycan-picker" aria-labelledby="glycan-heading">
+    <h2 id="glycan-heading">Edit glycan</h2>
+    <p id="glycan-attachment"></p>
+    <div class="glycan-editor">
+      <div class="glycan-text">
+        <label for="glycan-iupac">IUPAC</label>
+        <textarea id="glycan-iupac" rows="15" spellcheck="false" autocapitalize="off"></textarea>
+        <div class="actions"><button id="glycan-format" class="secondary compact" type="button">Format</button><button id="glycan-undo" class="secondary compact" type="button">Undo</button></div>
+      </div>
+      <div class="glycan-graphic">
+        <div id="glycan-tree" aria-label="SNFG glycan tree"></div>
+        <fieldset id="glycan-tree-controls" disabled>
+          <h3>Selected sugar: <span id="glycan-selected-label"></span></h3>
+          <div class="glycan-fields">
+            <label>Sugar<select id="glycan-node-sugar"></select></label>
+            <label>Anomer<select id="glycan-node-anomer"><option value="a">α</option><option value="b">β</option></select></label>
+            <label>Donor position<select id="glycan-node-donor" title="The donor is the sugar’s anomeric carbon."></select></label>
+            <label id="glycan-link-field">Acceptor position<select id="glycan-node-position"></select></label>
+            <button id="glycan-remove" class="secondary compact" type="button">Remove branch</button>
+          </div>
+          <h3>Add to selected sugar</h3>
+          <div class="glycan-fields">
+            <label>Sugar<select id="glycan-add-sugar"></select></label>
+            <label>Anomer<select id="glycan-add-anomer"><option value="a">α</option><option value="b" selected>β</option></select></label>
+            <label>Donor position<select id="glycan-add-donor" title="The donor is the sugar’s anomeric carbon."></select></label>
+            <label>Acceptor position<select id="glycan-add-position"></select></label>
+            <button id="glycan-add" class="secondary compact" type="button">Add sugar</button>
+          </div>
+        </fieldset>
+      </div>
+    </div>
+    <p id="glycan-status" class="small" role="status" hidden>Updating glycan…</p>
+    <p id="glycan-error" class="error" role="alert" hidden></p>
+    <div class="actions"><button id="glycan-apply" type="button" disabled>Apply</button><button id="glycan-cancel" class="secondary" type="button">Cancel</button></div>
+  </dialog>
+  <dialog id="ss-picker" aria-labelledby="ss-heading">
+    <h2 id="ss-heading">Add SS bond</h2>
+    <form id="ss-form">
+      <label for="ss-first">Cysteine</label><select id="ss-first" required></select>
+      <label for="ss-second">Cysteine</label><select id="ss-second" required></select>
+      <p id="ss-error" class="error" role="alert" hidden></p>
+      <div class="actions"><button type="submit">Add</button><button class="secondary" type="button" data-close="ss-picker">Cancel</button></div>
+    </form>
+  </dialog>
+</body>
 </html>

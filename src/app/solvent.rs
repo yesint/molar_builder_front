@@ -1,98 +1,54 @@
 use super::*;
-
-pub(super) fn solvent(ui: Ui) -> impl IntoView {
-    let init = ui
-        .plan
-        .get_untracked()
-        .solvent
-        .unwrap_or_else(|| ui.saved_solvent.get_value());
-    view! {
-        <label>
-            <input
-                type="checkbox"
-                prop:checked=move || ui.plan.with(|p| p.solvent.is_some())
-                on:change=move |e| {
-                    ui.plan
-                        .update(|p| {
-                            p.solvent = if input(&e).checked() {
-                                Some(ui.saved_solvent.get_value())
-                            } else {
-                                if let Some(settings) = p.solvent.take() {
-                                    ui.saved_solvent.set_value(settings);
-                                }
-                                None
-                            };
-                        })
-                }
-            />
-            "Add water and ions"
-        </label>
-        <section hidden=move || {
-            ui.plan.with(|p| p.solvent.is_none())
-        }>
-            {[
-                (0, "Waters per lipid", init.waters_per_lipid),
-                (1, "Water clearance (nm)", init.clearance_nm),
-                (2, "Salt concentration (mol/L)", init.concentration),
-            ]
-                .into_iter()
-                .map(move |(i, name, v)| {
-                    view! {
-                        <label>
-                            {name}
-                            <input
-                                type="number"
-                                min="0"
-                                step="any"
-                                value=v
-                                on:input=move |e| {
-                                    ui.plan
-                                        .update(|p| {
-                                            if let Some(s) = &mut p.solvent {
-                                                let v = event_target_value(&e).parse().unwrap_or(-1.);
-                                                match i {
-                                                    0 => s.waters_per_lipid = v,
-                                                    1 => s.clearance_nm = v,
-                                                    _ => s.concentration = v,
-                                                }
-                                            }
-                                        })
-                                }
-                            />
-                        </label>
-                    }
+pub(super) fn setup(ui: Ui) {
+    on("assembly-options", "input", move |_| {
+        ui.plan.update(|p| {
+            if field("add-solvent").checked() {
+                p.solvent = Some(Solvent {
+                    waters_per_lipid: field("waters-per-lipid").value_as_number(),
+                    clearance_nm: field("water-clearance").value_as_number(),
+                    salt: select("assembly-salt").value(),
+                    concentration: field("salt-concentration").value_as_number(),
+                    neutralize: field("neutralize-system").checked(),
+                });
+            } else {
+                p.solvent = None;
+            }
+        });
+        ui.set_done(4, false);
+        ui.set_done(5, false);
+    });
+    click("continue-solvent", move || {
+        let p = ui.plan.get_untracked();
+        if p.solvent.is_some()
+            && ["waters-per-lipid", "water-clearance", "salt-concentration"]
+                .iter()
+                .any(|id| {
+                    (*id != "waters-per-lipid" || p.membrane.is_some())
+                        && !field(id).report_validity()
                 })
-                .collect_view()}
-            <label>
-                "Salt"
-                <select on:change=move |e| {
-                    ui.plan
-                        .update(|p| {
-                            if let Some(s) = &mut p.solvent {
-                                s.salt = event_target_value(&e);
-                            }
-                        })
-                }>
-                    {["NaCl", "KCl", "CaCl2", "MgCl2"]
-                        .into_iter()
-                        .map(|s| view! { <option selected=init.salt == s>{s}</option> })
-                        .collect_view()}
-                </select>
-            </label> <label>
-                <input
-                    type="checkbox"
-                    checked=init.neutralize
-                    on:change=move |e| {
-                        ui.plan
-                            .update(|p| {
-                                if let Some(s) = &mut p.solvent {
-                                    s.neutralize = input(&e).checked();
-                                }
-                            })
-                    }
-                />
-                "Neutralize net charge"
-            </label>
-        </section>
-    }
+        {
+            return;
+        }
+        ui.set_done(4, true);
+        ui.go(5);
+    });
+    Effect::new(move |_| {
+        let p = ui.plan.get();
+        let membrane = p.membrane.is_some();
+        let solvent = p.solvent.is_some();
+        visible("waters-per-lipid", membrane);
+        visible("waters-per-lipid-label", membrane);
+        visible("solvent-parameters", solvent);
+        enabled("solvent-parameters", solvent);
+        label(
+            "assembly-box",
+            if membrane {
+                "Box: hexagonal membrane cell."
+            } else {
+                "Box: rhombic dodecahedron."
+            },
+        );
+        enabled("continue-solvent", ui.ready() && !ui.busy.get());
+        enabled("assembly-options", !ui.busy.get());
+    });
 }

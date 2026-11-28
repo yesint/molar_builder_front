@@ -10,15 +10,52 @@ use web_sys::HtmlCanvasElement;
 pub struct Scene {
     pub path: String,
     pub name: String,
-    pub style: String,
+
     pub selection: String,
     pub ligand: Option<usize>,
+    pub layers: Vec<Layer>,
     pub bytes: Option<std::sync::Arc<Vec<u8>>>,
+}
+pub const PALETTE: [&str; 18] = [
+    "#e63232", "#ff8c00", "#f0dc28", "#3cc850", "#3cc8d2", "#3c6ef0", "#9650dc", "#dc3cc8",
+    "#f082b4", "#1e9696", "#aadc28", "#283c96", "#f5f5f5", "#c8c8c8", "#8c8c8c", "#505050",
+    "#191919", "#965a32",
+];
+#[derive(Clone, Debug, PartialEq)]
+pub struct Layer {
+    pub role: &'static str,
+    pub selection: String,
+    pub style: &'static str,
+    pub color: &'static str,
+}
+impl Layer {
+    pub fn new(
+        role: &'static str,
+        selection: String,
+        style: &'static str,
+        color: &'static str,
+    ) -> Self {
+        Self {
+            role,
+            selection,
+            style,
+            color,
+        }
+    }
+}
+pub struct Preview {
+    pub bytes: Option<std::sync::Arc<Vec<u8>>>,
+    pub path: String,
+    pub name: String,
+    pub layers: Vec<Layer>,
+}
+struct LoadedPreview {
+    molecule: MoleculeHandle,
+    layers: Vec<(Layer, RepresentationHandle)>,
 }
 pub enum Action {
     Show(Scene),
-    Clear,
-    Select(String),
+    Preview(Vec<Preview>),
     Edit(bool),
     Save(futures_channel::oneshot::Sender<Result<(), String>>),
 }
@@ -47,7 +84,7 @@ impl Viewer {
 }
 struct Current {
     molecule: MoleculeHandle,
-    representation: RepresentationHandle,
+
     ligand: Option<usize>,
     partition: Option<String>,
     initial_cif: Option<String>,
@@ -73,6 +110,7 @@ struct Controller {
     canvas: HtmlCanvasElement,
     host: Option<ViewerHandle>,
     current: Option<Current>,
+    previews: std::collections::BTreeMap<String, LoadedPreview>,
     plan: RwSignal<Plan>,
     editing: RwSignal<bool>,
 }
@@ -85,32 +123,12 @@ impl Controller {
                 let _ = reply.send(result.clone());
                 result?;
             }
-            Action::Clear => {
-                if let Some(host) = &self.host {
-                    host.clear().await?;
-                }
-                self.current = None;
-                self.editing.set(false);
-            }
+            Action::Preview(models) => self.preview(models).await?,
             Action::Edit(enabled) => {
                 if let Some(current) = &self.current
                     && current.ligand.is_some()
                 {
                     current.molecule.set_editing(enabled).await?;
-                }
-            }
-            Action::Select(selection) => {
-                if let Some(current) = &self.current {
-                    if !selection.is_empty() {
-                        current
-                            .representation
-                            .select_text(selection.clone())
-                            .await?;
-                    }
-                    current
-                        .representation
-                        .set_visible(!selection.is_empty())
-                        .await?;
                 }
             }
             Action::Show(scene) => self.show(scene).await?,
@@ -125,6 +143,110 @@ impl Controller {
         Ok(())
     }
 
+    async fn start(&mut self) -> Result<(), String> {
+        if self.host.is_none() {
+            let host = ViewerHandle::start(self.canvas.clone()).await?;
+            host.with_app(|app| {
+                app.set_ui_visibility(false, true);
+                app.set_theme("light")?;
+                app.set_background_solid([1., 1., 1.]);
+                Ok(())
+            })
+            .await?;
+            self.host = Some(host);
+        }
+        Ok(())
+    }
+    async fn preview(&mut self, models: Vec<Preview>) -> Result<(), String> {
+        if models.is_empty() && self.host.is_none() {
+            return Ok(());
+        }
+        self.start().await?;
+        let host = self.host.as_ref().unwrap();
+        if self.current.is_some()
+            || self
+                .previews
+                .keys()
+                .any(|key| !models.iter().any(|m| m.path == *key))
+        {
+            self.save().await?;
+            host.clear().await?;
+            self.current = None;
+            self.previews.clear();
+            self.editing.set(false);
+        }
+        let oriented = models.iter().any(|m| m.name == "membrane_planes.cif");
+        let mut added = false;
+        for model in models {
+            let layers: Vec<_> = model
+                .layers
+                .into_iter()
+                .filter(|l| !l.selection.is_empty() && l.selection != "not all")
+                .collect();
+            if !self.previews.contains_key(&model.path) {
+                if layers.is_empty() {
+                    continue;
+                }
+                let bytes = match model.bytes {
+                    Some(b) => b.as_ref().clone(),
+                    None => api::bytes(&model.path, None).await?,
+                };
+                let system = read_system(&model.name, bytes)?;
+                let molecule = host.add_system(model.name, Rc::new(system)).await?;
+                for rep in molecule.representations().await? {
+                    rep.remove().await?;
+                }
+                self.previews.insert(
+                    model.path.clone(),
+                    LoadedPreview {
+                        molecule,
+                        layers: vec![],
+                    },
+                );
+                added = true;
+            }
+            let entry = self.previews.get_mut(&model.path).unwrap();
+            for (old, rep) in &entry.layers {
+                if !layers.iter().any(|new| new.role == old.role) {
+                    rep.set_visible(false).await?;
+                }
+            }
+            for layer in layers {
+                if let Some((old, rep)) = entry
+                    .layers
+                    .iter_mut()
+                    .find(|(old, _)| old.role == layer.role)
+                {
+                    if old.selection != layer.selection {
+                        rep.select_text(layer.selection.clone()).await?;
+                        *old = layer;
+                    }
+                    rep.set_visible(true).await?;
+                } else {
+                    let rep = entry
+                        .molecule
+                        .add_rep(
+                            layer.selection.clone(),
+                            layer.style.into(),
+                            layer.color.into(),
+                        )
+                        .await?;
+                    entry.layers.push((layer, rep));
+                }
+            }
+        }
+        if added {
+            host.with_app(move |app| {
+                app.reset_view();
+                if oriented {
+                    app.rotate_view(0., 70.);
+                }
+                Ok(())
+            })
+            .await?;
+        }
+        Ok(())
+    }
     async fn show(&mut self, scene: Scene) -> Result<(), String> {
         self.save().await?;
         let saved = scene
@@ -138,17 +260,8 @@ impl Controller {
         } else {
             (scene.name, api::bytes(&scene.path, None).await?)
         };
-        if self.host.is_none() {
-            let host = ViewerHandle::start(self.canvas.clone()).await?;
-            host.with_app(|app| {
-                app.set_ui_visibility(false, true);
-                app.set_theme("light")?;
-                app.set_background_solid([1., 1., 1.]);
-                Ok(())
-            })
-            .await?;
-            self.host = Some(host);
-        }
+        self.start().await?;
+        self.previews.clear();
         let host = self.host.as_ref().unwrap();
         host.clear().await?;
         self.current = None;
@@ -157,47 +270,49 @@ impl Controller {
         let molecule = if scene.ligand.is_some() {
             host.add_editable(name, bytes).await?
         } else {
-            let extension = name.rsplit('.').next().unwrap_or("cif");
-            let mut reader = FileHandler::from_reader(extension, Cursor::new(bytes))
-                .map_err(|e| e.to_string())?;
-            let (topology, state) = reader.read().map_err(|e| e.to_string())?;
-            let system = System::new(topology, state).map_err(|e| e.to_string())?;
+            let system = read_system(&name, bytes)?;
             if final_system {
-                layers = assembly_layers(&system, self.plan);
+                layers = scene
+                    .layers
+                    .into_iter()
+                    .filter(|layer| {
+                        !layer.selection.is_empty()
+                            && layer.selection != "not all"
+                            && system.select(&layer.selection).is_ok()
+                    })
+                    .collect();
             }
             host.add_system(name, Rc::new(system)).await?
         };
         for representation in molecule.representations().await? {
             representation.remove().await?;
         }
-        let visible = !scene.selection.is_empty() && layers.is_empty();
-        let selection = if scene.selection.is_empty() {
-            "all".into()
-        } else {
-            scene.selection
-        };
-        let color = if scene.ligand.is_some() {
-            "element"
-        } else {
-            "chain"
-        };
-        let representation = molecule
-            .add_rep(selection, scene.style, color.into())
-            .await?;
-        representation.set_visible(visible).await?;
-        if final_system {
-            let id = molecule.id();
-            host.with_app(move |app| {
-                for (selection, style, color) in layers {
-                    app.add_styled_rep(id, &selection, style, color)?;
+        if !final_system {
+            layers.push(Layer::new(
+                "ligand",
+                scene.selection,
+                "ballstick",
+                "element",
+            ));
+            molecule.set_editing(false).await?;
+        }
+        let id = molecule.id();
+        host.with_app(move |app| {
+            for layer in layers {
+                let rep = app.add_styled_rep(id, &layer.selection, layer.style, layer.color)?;
+                if layer.style == "ballstick" {
+                    let (mi, ri) = app.resolve_rep(id, rep)?;
+                    app.set_ballstick_bonds(mi, ri, 0.15, 0.5)?;
                 }
+            }
+            if final_system {
                 let index = app.resolve_molecule(id)?;
                 app.set_molecule_box_visible(index, true)?;
-                app.reset_view();
-                Ok(())
-            })
-            .await?;
-        }
+            }
+            app.reset_view();
+            Ok(())
+        })
+        .await?;
         let partition = self.plan.with_untracked(|p| p.partition.clone());
         let initial_cif = if let Some(index) = scene.ligand {
             let baseline = molecule.export_cif().await?;
@@ -215,7 +330,6 @@ impl Controller {
         };
         self.current = Some(Current {
             molecule,
-            representation,
             ligand: scene.ligand,
             partition,
             initial_cif,
@@ -224,46 +338,13 @@ impl Controller {
     }
 }
 
-fn assembly_layers(
-    system: &System,
-    plan: RwSignal<Plan>,
-) -> Vec<(String, &'static str, &'static str)> {
-    let lipids = plan.with_untracked(|plan| {
-        plan.membrane
-            .as_ref()
-            .map(|m| m.rows.iter().map(|r| r.id.clone()).collect::<Vec<_>>())
-            .unwrap_or_default()
-    });
-    let names: std::collections::BTreeSet<_> = system
-        .iter_atoms()
-        .map(|a| a.get_resname().to_owned())
-        .collect();
-    let mut layers = Vec::new();
-    let mut protein = Vec::new();
-    for name in names {
-        let (style, color) = if name == "SOL" {
-            ("lines", "element")
-        } else if matches!(name.as_str(), "SOD" | "POT" | "MG" | "CAL" | "CLA") {
-            ("vdw", "element")
-        } else if lipids.contains(&name) {
-            ("licorice", "resname")
-        } else if name
-            .strip_prefix('L')
-            .is_some_and(|s| s.len() == 4 && s.bytes().all(|c| c.is_ascii_digit()))
-        {
-            ("ballstick", "element")
-        } else {
-            protein.push(name);
-            continue;
-        };
-        layers.push((format!("resname {name}"), style, color));
-    }
-    if !protein.is_empty() {
-        layers.push((format!("resname {}", protein.join(" ")), "cartoon", "chain"));
-    }
-    layers
+fn read_system(name: &str, bytes: Vec<u8>) -> Result<System, String> {
+    let extension = name.rsplit('.').next().unwrap_or("cif");
+    let mut reader =
+        FileHandler::from_reader(extension, Cursor::new(bytes)).map_err(|e| e.to_string())?;
+    let (topology, state) = reader.read().map_err(|e| e.to_string())?;
+    System::new(topology, state).map_err(|e| e.to_string())
 }
-
 async fn watch_edits(
     molecule: MoleculeHandle,
     index: usize,
@@ -306,12 +387,20 @@ pub async fn serve(
         canvas,
         host: None,
         current: None,
+        previews: Default::default(),
         plan,
         editing,
     };
     while let Some(action) = actions.next().await {
+        let rendering = matches!(&action, Action::Show(_) | Action::Preview(_));
+        let parent = controller.canvas.parent_element();
         if let Err(error) = controller.apply(action).await {
+            if rendering && let Some(p) = parent {
+                let _ = p.set_attribute("data-state", "unavailable");
+            }
             message.set(error);
+        } else if rendering && let Some(p) = parent {
+            let _ = p.set_attribute("data-state", "rendered");
         }
     }
 }

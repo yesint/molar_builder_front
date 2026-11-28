@@ -16,7 +16,7 @@ sha2 = "0.10"
 wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = [
     "Blob", "Crypto", "File", "FileList", "HtmlAnchorElement", "HtmlCanvasElement",
-    "HtmlInputElement", "Location", "Storage", "Url", "Window",
+    "DomParser", "SupportedType", "DomTokenList", "HtmlCollection", "History", "HtmlDialogElement", "HtmlSelectElement", "HtmlTextAreaElement", "KeyboardEvent", "DomRect", "HtmlInputElement", "Location", "Storage", "Url", "Window",
 ] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
