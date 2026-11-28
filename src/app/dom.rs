@@ -136,8 +136,11 @@ where
                             >
                                 "Previous"
                             </button>
-                            <button class="secondary compact" disabled=move || page.get() + 1>
-                                =pages on:click=move |_|page.update(|n|*n=(*n+1).min(pages-1))>
+                            <button
+                                class="secondary compact"
+                                disabled=move || page.get() + 1 == pages
+                                on:click=move |_| page.update(|n| *n = (*n + 1).min(pages - 1))
+                            >
                                 "Next"
                             </button>
                         </div>

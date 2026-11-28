@@ -37,47 +37,6 @@
       </aside>
       <div class="project-content">
         <section id="page-load" aria-labelledby="load-heading">
-          <div class="stage-heading">
-            <h2 id="load-heading" tabindex="-1">1. Components</h2>
-            <button class="secondary help-button" type="button" aria-label="Help for Components" aria-haspopup="dialog" aria-controls="stage-help"
-              data-help="Load your files and choose which proteins and other molecules to keep. If you only want a membrane, go straight to the Membrane step.">?</button>
-          </div>
-          <div class="protein-layout">
-            <div class="protein-controls">
-              <div class="protein-toolbar component-files">
-                <button id="load-structure" type="button">Load...</button>
-                <input id="structure-file" type="file" accept=".pdb,.cif,.mmcif,.sdf,.sd" multiple hidden>
-                <span id="structure-filename" class="small"></span>
-                <button id="add-ligand-files" type="button" class="secondary">Add ligands...</button>
-                <input id="ligand-files" type="file" accept=".pdb,.cif,.mmcif,.sdf,.sd" multiple hidden>
-                <span id="ligand-filenames" class="small"></span>
-              </div>
-              <fieldset id="load-options" hidden disabled>
-                <div class="protein-section" id="load-protein-section"><h3>Protein</h3>
-                  <div class="component-tabs" role="tablist" aria-label="Protein selection">
-                    <button id="protein-chains-tab" type="button" role="tab" aria-selected="true" aria-controls="protein-chains-panel">Choose</button>
-                    <button id="protein-custom-tab" type="button" role="tab" aria-selected="false" aria-controls="protein-custom-panel" tabindex="-1">Custom selection</button>
-                  </div>
-                  <div id="protein-chains-panel" role="tabpanel" aria-labelledby="protein-chains-tab"><div id="load-chains"></div></div>
-                  <div id="protein-custom-panel" role="tabpanel" aria-labelledby="protein-custom-tab" hidden></div>
-                </div>
-                <div class="protein-section"><h3>Ligands</h3>
-                  <div class="component-tabs" role="tablist" aria-label="Ligand selection">
-                    <button id="ligand-residues-tab" type="button" role="tab" aria-selected="true" aria-controls="ligand-residues-panel">Choose</button>
-                    <button id="ligand-custom-tab" type="button" role="tab" aria-selected="false" aria-controls="ligand-custom-panel" tabindex="-1">Custom selection</button>
-                  </div>
-                  <div id="ligand-residues-panel" role="tabpanel" aria-labelledby="ligand-residues-tab">
-                    <div class="component-ligand-list" id="load-ligands"></div>
-                  </div>
-                  <div id="ligand-custom-panel" role="tabpanel" aria-labelledby="ligand-custom-tab" hidden></div>
-                </div>
-              </fieldset>
-              <div class="actions" id="load-actions" hidden><button id="partition-system" type="button">Continue</button></div>
-              <p id="load-status" role="status" hidden></p><progress id="load-progress" hidden></progress>
-              <p id="load-error" class="error" role="alert" hidden></p>
-            </div>
-            <div id="load-viewer" hidden class="structure-viewer" aria-label="Loaded structure"></div>
-          </div>
         </section>
 
         <section id="page-proteins" aria-labelledby="proteins-heading" hidden>

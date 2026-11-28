@@ -197,8 +197,8 @@ pub fn Builder() -> impl IntoView {
         ui.msg,
         ui.editing,
     ));
-    mount_viewer_canvas(canvas);
     setup(ui);
+    mount_viewer_canvas(canvas);
     spawn_local(async move {
         match api::get::<Value>("/api/health").await {
             Ok(v) => ui.health.set(v),
@@ -217,7 +217,10 @@ pub fn Builder() -> impl IntoView {
     });
 }
 fn setup(ui: Ui) {
-    components::setup(ui);
+    mount(
+        "page-load",
+        move || view! { <components::ComponentsPage ui /> },
+    );
     protein::setup(ui);
     ligands::setup(ui);
     membrane::setup(ui);
@@ -307,6 +310,9 @@ fn setup(ui: Ui) {
         }
     });
     Effect::new(move |_| {
+        if ui.stage.get() == 0 {
+            return;
+        }
         let id = [
             "load-error",
             "protein-error",

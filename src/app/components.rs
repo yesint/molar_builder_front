@@ -358,15 +358,24 @@ fn custom(ui: Ui, source: Source, role: usize) -> impl IntoView {
             .map(|_| RwSignal::new(String::new()))
             .collect::<Vec<_>>()
     }));
+    let input = NodeRef::<leptos::html::Input>::new();
     let draft = move || drafts.with_value(|v| v[active.get()]);
     let add = move || {
         let value = draft().get_untracked().trim().to_string();
         if value.is_empty() {
             return;
         }
-        models
-            .with_value(|v| v[active.get_untracked()].custom[role].update(|list| list.push(value)));
+        models.with_value(|v| {
+            v[active.get_untracked()].custom[role].update(|list| {
+                if !list.contains(&value) {
+                    list.push(value);
+                }
+            })
+        });
         draft().set(String::new());
+        if let Some(input) = input.get_untracked() {
+            let _ = input.focus();
+        }
         ui.invalidate_components();
     };
     let id = format!(
@@ -409,6 +418,7 @@ fn custom(ui: Ui, source: Source, role: usize) -> impl IntoView {
                     })}
                 <input
                     id=id
+                    node_ref=input
                     type="text"
                     autocomplete="off"
                     spellcheck="false"
@@ -416,6 +426,7 @@ fn custom(ui: Ui, source: Source, role: usize) -> impl IntoView {
                     on:input=move |e| draft().set(event_target_value(&e))
                     on:keydown=move |e| {
                         if e.key() == "Enter" {
+                            e.prevent_default();
                             add();
                         }
                     }
@@ -450,7 +461,13 @@ fn custom(ui: Ui, source: Source, role: usize) -> impl IntoView {
                                                     <input
                                                         prop:value=item
                                                         on:change=move |e| {
-                                                            saved.update(|v| v[i] = event_target_value(&e));
+                                                            let input = event_target::<HtmlInputElement>(&e);
+                                                            let value = input.value().trim().to_owned();
+                                                            if value.is_empty() {
+                                                                saved.with_untracked(|v| input.set_value(&v[i]));
+                                                                return;
+                                                            }
+                                                            saved.update(|v| v[i] = value);
                                                             ui.invalidate_components();
                                                         }
                                                     />
@@ -477,47 +494,81 @@ fn custom(ui: Ui, source: Source, role: usize) -> impl IntoView {
         </div>
     }
 }
-pub(super) fn setup(ui: Ui) {
-    for (extra, button, picker, names) in [
+#[component]
+fn FilePicker(ui: Ui, extra: bool, status: RwSignal<&'static str>) -> impl IntoView {
+    let input = NodeRef::<leptos::html::Input>::new();
+    let (button, picker, names, title) = if extra {
         (
-            false,
+            "add-ligand-files",
+            "ligand-files",
+            "ligand-filenames",
+            "Add ligands...",
+        )
+    } else {
+        (
             "load-structure",
             "structure-file",
             "structure-filename",
-        ),
-        (true, "add-ligand-files", "ligand-files", "ligand-filenames"),
-    ] {
-        click(button, move || field(picker).click());
-        on(picker, "change", move |_| {
-            let input = field(picker);
-            let Some(files) = input.files() else { return };
-            let files = (0..files.length())
-                .filter_map(|i| files.item(i))
-                .collect::<Vec<_>>();
-            input.set_value("");
-            ui.task(async move {
-                let mut batch = vec![];
-                for file in files {
-                    let name = file.name();
-                    let models = api::upload(&file)
-                        .await?
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, u)| Model::new(u, i, extra))
-                        .collect();
-                    batch.push(Source {
-                        name,
-                        extra,
-                        models,
-                    });
-                }
-                ui.files.update(|v| v.extend(batch));
-                ui.invalidate_components();
-                Ok(())
-            });
+            "Load...",
+        )
+    };
+    let upload = move |_| {
+        let Some(input) = input.get_untracked() else {
+            return;
+        };
+        let Some(files) = input.files() else { return };
+        let files: Vec<_> = (0..files.length()).filter_map(|i| files.item(i)).collect();
+        input.set_value("");
+        if files.is_empty() {
+            return;
+        }
+        status.set("Reading components…");
+        ui.task(async move {
+            let mut batch = Vec::new();
+            for file in files {
+                let name = file.name();
+                let models = api::upload(&file)
+                    .await?
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, u)| Model::new(u, i, extra))
+                    .collect();
+                batch.push(Source {
+                    name,
+                    extra,
+                    models,
+                });
+            }
+            ui.files.update(|v| v.extend(batch));
+            ui.invalidate_components();
+            Ok(())
         });
-        mount(names, move || {
-            move || {
+    };
+    view! {
+        <button
+            type="button"
+            id=button
+            class:secondary=extra
+            disabled=move || ui.busy.get()
+            on:click=move |_| {
+                if let Some(input) = input.get_untracked() {
+                    input.click();
+                }
+            }
+        >
+            {title}
+        </button>
+        <input
+            id=picker
+            node_ref=input
+            type="file"
+            accept=".pdb,.cif,.mmcif,.sdf,.sd"
+            multiple
+            hidden
+            on:change=upload
+        />
+        <span id=names class="small">
+            {move || {
                 ui.files
                     .get()
                     .into_iter()
@@ -530,6 +581,7 @@ pub(super) fn setup(ui: Ui) {
                                 <button
                                     class="secondary compact"
                                     aria-label=format!("Remove {}", s.name)
+                                    disabled=move || ui.busy.get()
                                     on:click=move |_| {
                                         ui.files
                                             .update(|v| {
@@ -544,59 +596,97 @@ pub(super) fn setup(ui: Ui) {
                         }
                     })
                     .collect_view()
-            }
-        });
+            }}
+        </span>
     }
-    for (role, name, list, host) in [
-        (0, "protein", "chains", "load-chains"),
-        (1, "ligand", "residues", "load-ligands"),
-    ] {
-        for (i, tab) in [list, "custom"].into_iter().enumerate() {
-            let activate = move |n: usize| {
-                for (j, t) in [list, "custom"].into_iter().enumerate() {
-                    let id = format!("{name}-{t}");
-                    let b = el(&(id.clone() + "-tab"));
-                    b.set_attribute("aria-selected", if j == n { "true" } else { "false" })
-                        .unwrap();
-                    b.set_attribute("tabindex", if j == n { "0" } else { "-1" })
-                        .unwrap();
-                    visible(&(id + "-panel"), n == j);
+}
+
+#[component]
+fn SelectionTabs(ui: Ui, role: usize) -> impl IntoView {
+    let protein = role == 0;
+    let (title, list, list_tab, custom_tab, list_panel, custom_panel, host) = if protein {
+        (
+            "Protein",
+            "Protein selection",
+            "protein-chains-tab",
+            "protein-custom-tab",
+            "protein-chains-panel",
+            "protein-custom-panel",
+            "load-chains",
+        )
+    } else {
+        (
+            "Ligands",
+            "Ligand selection",
+            "ligand-residues-tab",
+            "ligand-custom-tab",
+            "ligand-residues-panel",
+            "ligand-custom-panel",
+            "load-ligands",
+        )
+    };
+    let active = RwSignal::new(false);
+    let refs = [NodeRef::<leptos::html::Button>::new(), NodeRef::new()];
+    let tab = move |is_custom: bool| {
+        let (id, panel, title) = if is_custom {
+            (custom_tab, custom_panel, "Custom selection")
+        } else {
+            (list_tab, list_panel, "Choose")
+        };
+        view! {
+            <button
+                id=id
+                node_ref=refs[usize::from(is_custom)]
+                type="button"
+                role="tab"
+                aria-controls=panel
+                aria-selected=move || (active.get() == is_custom).to_string()
+                tabindex=move || if active.get() == is_custom { "0" } else { "-1" }
+                on:click=move |_| active.set(is_custom)
+                on:keydown=move |e| {
+                    let next = match e.key().as_str() {
+                        "Home" => false,
+                        "End" => true,
+                        "ArrowLeft" | "ArrowRight" => !is_custom,
+                        _ => return,
+                    };
+                    e.prevent_default();
+                    active.set(next);
+                    if let Some(b) = refs[usize::from(next)].get_untracked() {
+                        let _ = b.focus();
+                    }
                 }
-            };
-            let id = format!("{name}-{tab}-tab");
-            click(&id, move || activate(i));
-            on(&id, "keydown", move |e| {
-                let e: web_sys::KeyboardEvent = e.unchecked_into();
-                let next = match e.key().as_str() {
-                    "Home" => 0,
-                    "End" => 1,
-                    "ArrowLeft" | "ArrowRight" => 1 - i,
-                    _ => return,
-                };
-                e.prevent_default();
-                activate(next);
-                focus(&format!("{name}-{}-tab", [list, "custom"][next]));
-            });
+            >
+                {title}
+            </button>
         }
-        mount(host, move || {
-            move || {
-                ui.files
-                    .get()
-                    .into_iter()
-                    .map(|s| group(ui, s, role))
-                    .collect_view()
-            }
-        });
-        mount(&format!("{name}-custom-panel"), move || {
-            move || {
-                ui.files
-                    .get()
-                    .into_iter()
-                    .map(|s| custom(ui, s, role))
-                    .collect_view()
-            }
-        });
+    };
+    view! {
+        <div class="protein-section" id=protein.then_some("load-protein-section")>
+            <h3>{title}</h3>
+            <div class="component-tabs" role="tablist" aria-label=list>
+                {tab(false)}
+                {tab(true)}
+            </div>
+            <div id=list_panel role="tabpanel" aria-labelledby=list_tab hidden=move || active.get()>
+                <div id=host class:component-ligand-list=!protein>
+                    {move || ui.files.get().into_iter().map(|s| group(ui, s, role)).collect_view()}
+                </div>
+            </div>
+            <div
+                id=custom_panel
+                role="tabpanel"
+                aria-labelledby=custom_tab
+                hidden=move || !active.get()
+            >
+                {move || ui.files.get().into_iter().map(|s| custom(ui, s, role)).collect_view()}
+            </div>
+        </div>
     }
+}
+
+#[component]
+pub(super) fn ComponentsPage(ui: Ui) -> impl IntoView {
     Effect::new(move |_| {
         let files = ui.files.get();
         let project = files
@@ -640,25 +730,12 @@ pub(super) fn setup(ui: Ui) {
             );
         });
     });
-    Effect::new(move |_| {
-        let loaded = !ui.files.with(Vec::is_empty);
-        for id in ["load-options", "load-actions", "load-viewer"] {
-            visible(id, loaded);
-        }
-        for id in [
-            "load-options",
-            "partition-system",
-            "load-structure",
-            "add-ligand-files",
-        ] {
-            enabled(
-                id,
-                !ui.busy.get() && (loaded || id == "load-structure" || id == "add-ligand-files"),
-            );
-        }
-        visible("load-progress", ui.busy.get() && ui.stage.get() == 0);
-    });
-    click("partition-system", move || {
+    let status = RwSignal::new("");
+    let empty = move || ui.files.with(Vec::is_empty);
+    let disabled = move || empty() || ui.busy.get();
+    let idle = move || !ui.busy.get() || ui.stage.get() != 0;
+    let partition = move |_| {
+        status.set("Partitioning system…");
         ui.task(async move {
             ui.partition_components().await?;
             ui.set_done(0, true);
@@ -670,6 +747,63 @@ pub(super) fn setup(ui: Ui) {
                 3
             });
             Ok(())
-        })
-    });
+        });
+    };
+    view! {
+        <div class="stage-heading">
+            <h2 id="load-heading" tabindex="-1">
+                "1. Components"
+            </h2>
+            <button
+                class="secondary help-button"
+                type="button"
+                aria-label="Help for Components"
+                aria-haspopup="dialog"
+                aria-controls="stage-help"
+                data-help="Load your files and choose which proteins and other molecules to keep. If you only want a membrane, go straight to the Membrane step."
+            >
+                "?"
+            </button>
+        </div>
+        <div class="protein-layout">
+            <div class="protein-controls">
+                <div class="protein-toolbar component-files">
+                    <FilePicker ui extra=false status />
+                    <FilePicker ui extra=true status />
+                </div>
+                <fieldset id="load-options" hidden=empty disabled=disabled>
+                    <SelectionTabs ui role=0 />
+                    <SelectionTabs ui role=1 />
+                </fieldset>
+                <div class="actions" id="load-actions" hidden=empty>
+                    <button
+                        id="partition-system"
+                        type="button"
+                        disabled=disabled
+                        on:click=partition
+                    >
+                        "Continue"
+                    </button>
+                </div>
+                <p id="load-status" role="status" hidden=idle>
+                    {move || status.get()}
+                </p>
+                <progress id="load-progress" hidden=idle></progress>
+                <p
+                    id="load-error"
+                    class="error"
+                    role="alert"
+                    hidden=move || ui.msg.with(String::is_empty)
+                >
+                    {move || ui.msg.get()}
+                </p>
+            </div>
+            <div
+                id="load-viewer"
+                hidden=empty
+                class="structure-viewer"
+                aria-label="Loaded structure"
+            ></div>
+        </div>
+    }
 }
