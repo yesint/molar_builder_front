@@ -240,7 +240,7 @@ pub(super) fn preview(ui: Ui) {
                 .collect()
         })
     });
-    ui.viewer.send(Action::Preview("load-viewer", models));
+    ui.viewer.send(Action::Preview(Panel::Load, models));
 }
 fn checkbox(
     ui: Ui,
@@ -733,38 +733,24 @@ pub(super) fn ComponentsPage(ui: Ui) -> impl IntoView {
     let status = RwSignal::new("");
     let empty = move || ui.files.with(Vec::is_empty);
     let disabled = move || empty() || ui.busy.get();
-    let idle = move || !ui.busy.get() || ui.stage.get() != 0;
+    let idle = move || !ui.busy.get() || ui.stage.get() != Page::Components;
     let partition = move |_| {
         status.set("Partitioning system…");
         ui.task(async move {
             ui.partition_components().await?;
-            ui.set_done(0, true);
+            ui.set_done(Page::Components, true);
             ui.go(if ui.has_protein() {
-                1
+                Page::Protein
             } else if ui.has_ligands() {
-                2
+                Page::Ligands
             } else {
-                3
+                Page::Membrane
             });
             Ok(())
         });
     };
     view! {
-        <div class="stage-heading">
-            <h2 id="load-heading" tabindex="-1">
-                "1. Components"
-            </h2>
-            <button
-                class="secondary help-button"
-                type="button"
-                aria-label="Help for Components"
-                aria-haspopup="dialog"
-                aria-controls="stage-help"
-                data-help="Load your files and choose which proteins and other molecules to keep. If you only want a membrane, go straight to the Membrane step."
-            >
-                "?"
-            </button>
-        </div>
+        <StageHeading ui page=Page::Components />
         <div class="protein-layout">
             <div class="protein-controls">
                 <div class="protein-toolbar component-files">
@@ -798,12 +784,7 @@ pub(super) fn ComponentsPage(ui: Ui) -> impl IntoView {
                     {move || ui.msg.get()}
                 </p>
             </div>
-            <div
-                id="load-viewer"
-                hidden=empty
-                class="structure-viewer"
-                aria-label="Loaded structure"
-            ></div>
+            <ViewerSurface ui panel=Panel::Load />
         </div>
     }
 }

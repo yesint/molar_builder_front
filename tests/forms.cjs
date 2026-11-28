@@ -152,6 +152,6 @@ async function solvent(page) {
         await membrane(page);
         await solvent(page);
         assert.deepEqual(errors,[]);
-        console.log('Components, Protein, Ligands Membrane and Solvent forms passed');
+        console.log('Passed Components, Protein, Ligands, Membrane and Solvent forms and their Submit summary.');
     } finally {await browser.close();}
 })().catch(err=>{console.error(err);process.exitCode=1;});

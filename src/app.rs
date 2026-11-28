@@ -7,11 +7,13 @@ mod ligands;
 mod membrane;
 mod protein;
 mod solvent;
+mod workspace;
+use workspace::*;
 
 use crate::{
     api,
     model::*,
-    viewer::{Action, Scene, Viewer},
+    viewer::{Action, Panel, Scene, Viewer},
 };
 use leptos::{prelude::*, task::spawn_local};
 use serde_json::{Value, json};
@@ -22,7 +24,10 @@ use web_sys::HtmlInputElement;
 #[derive(Clone, Copy)]
 struct Ui {
     plan: RwSignal<Plan>,
-    stage: RwSignal<usize>,
+    stage: RwSignal<Page>,
+    help: Modal,
+    headings: [NodeRef<leptos::html::H2>; 6],
+    panels: [NodeRef<leptos::html::Div>; 4],
     busy: RwSignal<bool>,
     msg: RwSignal<String>,
     uploads: RwSignal<Vec<Upload>>,
@@ -40,6 +45,28 @@ struct Ui {
     logs: RwSignal<Vec<(f64, String)>>,
 }
 impl Ui {
+    fn paid(self) -> bool {
+        self.health
+            .with(|h| matches!(h["mode"].as_str(), Some("sandbox" | "production")))
+    }
+    fn price(self) -> String {
+        self.health
+            .with(|h| format!("USD {}", h["amount"]["value"].as_str().unwrap_or("0.50")))
+    }
+    fn has_editable_ligands(self) -> bool {
+        self.part.with(|p| {
+            p.as_ref()
+                .is_some_and(|p| (0..p.ligands.len()).any(|i| !ligands::water(p, i)))
+        })
+    }
+    fn panel_visible(self, panel: Panel) -> bool {
+        match panel {
+            Panel::Load => self.files.with(|files| !files.is_empty()),
+            Panel::Protein => true,
+            Panel::Ligand => self.has_editable_ligands(),
+            Panel::Assembly => self.confirmed.get()[Page::Submit as usize],
+        }
+    }
     fn task(self, f: impl Future<Output = Result<(), String>> + 'static) {
         if self.busy.get_untracked() {
             return;
@@ -61,14 +88,14 @@ impl Ui {
         self.part
             .with(|p| p.as_ref().is_some_and(|p| !p.ligands.is_empty()))
     }
-    fn set_done(self, step: usize, done: bool) {
-        self.confirmed.update(|flags| flags[step] = done);
+    fn set_done(self, step: Page, done: bool) {
+        self.confirmed.update(|flags| flags[step as usize] = done);
     }
     fn invalidate_components(self) {
         self.part.set(None);
         self.confirmed.update(|flags| {
-            for i in [0, 1, 2, 5] {
-                flags[i] = false;
+            for i in [Page::Components, Page::Protein, Page::Ligands, Page::Submit] {
+                flags[i as usize] = false;
             }
         });
         self.ligand.set(0);
@@ -79,22 +106,22 @@ impl Ui {
         });
     }
     fn components_ready(self) -> bool {
-        self.uploads.with(Vec::is_empty) || self.confirmed.get()[0]
+        self.uploads.with(Vec::is_empty) || self.confirmed.get()[Page::Components as usize]
     }
     fn ready(self) -> bool {
         let confirmed = self.confirmed.get();
         !self.health.get().is_null()
             && self.components_ready()
-            && (!self.has_protein() || confirmed[1])
-            && (!self.has_ligands() || confirmed[2])
+            && (!self.has_protein() || confirmed[Page::Protein as usize])
+            && (!self.has_ligands() || confirmed[Page::Ligands as usize])
             && if self.plan.with(|p| p.membrane.is_some()) {
-                confirmed[3]
+                confirmed[Page::Membrane as usize]
             } else {
                 self.has_protein() || self.has_ligands()
             }
     }
-    fn go(self, step: usize) {
-        let _ = window().location().set_hash(PAGES[step]);
+    fn go(self, step: Page) {
+        let _ = window().location().set_hash(step.slug());
     }
     fn show_ligand(self, index: usize) {
         if let Some(p) = self.part.get_untracked()
@@ -137,36 +164,15 @@ impl Ui {
         Ok(())
     }
 }
-const PAGES: [&str; 6] = [
-    "load", "proteins", "ligands", "membrane", "solvent", "submit",
-];
-fn route(ui: Ui) {
-    let hash = window().location().hash().unwrap_or_default();
-    let page = match hash.trim_start_matches('#') {
-        "assembly" => "submit",
-        p => p,
-    };
-    let stage = PAGES.iter().position(|&s| s == page).unwrap_or(0);
-    let stage = match stage {
-        1 if !ui.has_protein() && !ui.uploads.with(|v| v.iter().any(|u| u.format != "sdf")) => 0,
-        2 if !ui.has_ligands() => 0,
-        i => i,
-    };
-    if !hash.is_empty() && hash != format!("#{}", PAGES[stage]) {
-        let _ = window().history().unwrap().replace_state_with_url(
-            &wasm_bindgen::JsValue::NULL,
-            "",
-            Some(&format!("#{}", PAGES[stage])),
-        );
-    }
-    ui.stage.set(stage);
-}
 #[component]
 pub fn Builder() -> impl IntoView {
     let (viewer, rx) = Viewer::new();
     let ui = Ui {
         plan: RwSignal::new(Plan::default()),
-        stage: RwSignal::new(0),
+        stage: RwSignal::new(Page::Components),
+        help: Modal::new(),
+        headings: std::array::from_fn(|_| NodeRef::new()),
+        panels: std::array::from_fn(|_| NodeRef::new()),
         busy: RwSignal::new(false),
         msg: RwSignal::new(String::new()),
         uploads: RwSignal::new(vec![]),
@@ -193,12 +199,51 @@ pub fn Builder() -> impl IntoView {
     spawn_local(crate::viewer::serve(
         canvas.clone(),
         rx,
+        viewer,
         ui.plan,
         ui.msg,
         ui.editing,
     ));
-    setup(ui);
-    mount_viewer_canvas(canvas);
+    route(ui);
+    let routing = window_event_listener(leptos::ev::hashchange, move |_| {
+        route(ui);
+        request_animation_frame(move || {
+            if let Some(heading) = ui.headings[ui.stage.get_untracked() as usize].get_untracked() {
+                let _ = heading.focus();
+            }
+        });
+    });
+    on_cleanup(move || routing.remove());
+    let standby = NodeRef::<leptos::html::Div>::new();
+    Effect::new(move |_| {
+        let panel = match ui.stage.get() {
+            Page::Components => Some(Panel::Load),
+            Page::Protein => Some(Panel::Protein),
+            Page::Ligands => Some(Panel::Ligand),
+            Page::Submit => Some(Panel::Assembly),
+            _ => None,
+        };
+        let target = panel
+            .filter(|&p| ui.panel_visible(p))
+            .map(|p| ui.panels[p as usize])
+            .unwrap_or(standby);
+        if let Some(host) = target.get()
+            && canvas.parent_node().as_ref() != Some(host.as_ref())
+        {
+            let _ = host.append_child(&canvas);
+        }
+    });
+    Effect::new(move |_| match ui.stage.get() {
+        Page::Components => components::preview(ui),
+        Page::Protein => protein::preview(ui),
+        Page::Ligands => ui.show_ligand(ui.ligand.get_untracked()),
+        Page::Submit => {
+            if let Some(r) = ui.result.get_untracked() {
+                r.preview(ui.viewer);
+            }
+        }
+        _ => (),
+    });
     spawn_local(async move {
         match api::get::<Value>("/api/health").await {
             Ok(v) => ui.health.set(v),
@@ -215,127 +260,5 @@ pub fn Builder() -> impl IntoView {
             Err(e) => ui.msg.set(e.to_string()),
         }
     });
-}
-fn setup(ui: Ui) {
-    mount(
-        "page-load",
-        move || view! { <components::ComponentsPage ui /> },
-    );
-    mount(
-        "page-proteins",
-        move || view! { <protein::ProteinPage ui /> },
-    );
-    mount(
-        "page-ligands",
-        move || view! { <ligands::LigandsPage ui /> },
-    );
-    mount(
-        "page-membrane",
-        move || view! { <membrane::MembranePage ui /> },
-    );
-    mount(
-        "page-solvent",
-        move || view! { <solvent::SolventPage ui /> },
-    );
-    checkout::setup(ui);
-    click("open-about", || {
-        let _ = dialog("about-builder").show_modal();
-    });
-    listen(document().as_ref(), "click", move |event| {
-        let Some(target) = event
-            .target()
-            .and_then(|v| v.dyn_into::<web_sys::Element>().ok())
-        else {
-            return;
-        };
-        if let Some(help) = target.get_attribute("data-help") {
-            let stage = ui.stage.get_untracked();
-            label(
-                "stage-help-heading",
-                &el(&format!("{}-heading", PAGES[stage]))
-                    .text_content()
-                    .unwrap_or_default(),
-            );
-            label("stage-help-text", &help);
-            let _ = dialog("stage-help").show_modal();
-        }
-        if let Some(id) = target.get_attribute("data-close") {
-            dialog(&id).close();
-        }
-    });
-    route(ui);
-    listen(window().as_ref(), "hashchange", move |_| {
-        route(ui);
-        focus(&format!("{}-heading", PAGES[ui.stage.get_untracked()]));
-    });
-    Effect::new(move |_| {
-        let stage = ui.stage.get();
-        let flags = ui.confirmed.get();
-        for (i, page) in PAGES.iter().enumerate() {
-            let a = document()
-                .query_selector(&format!("[data-page={page}]"))
-                .unwrap()
-                .unwrap();
-            let allowed = match i {
-                1 => ui.has_protein() || ui.uploads.with(|v| v.iter().any(|u| u.format != "sdf")),
-                2 => ui.has_ligands(),
-                _ => true,
-            };
-            if allowed {
-                a.set_attribute("href", &format!("#{page}")).unwrap();
-                a.remove_attribute("aria-disabled").unwrap();
-            } else {
-                a.remove_attribute("href").unwrap();
-                a.set_attribute("aria-disabled", "true").unwrap();
-            }
-            visible(&format!("page-{page}"), i == stage);
-            if i == stage {
-                a.set_attribute("aria-current", "page").unwrap();
-            } else {
-                a.remove_attribute("aria-current").unwrap();
-            }
-            visible(
-                [
-                    "load-ready",
-                    "protein-ready",
-                    "ligand-ready",
-                    "membrane-ready",
-                    "solvent-ready",
-                    "assembly-ready",
-                ][i],
-                flags[i],
-            );
-        }
-    });
-    Effect::new(move |_| {
-        let stage = ui.stage.get();
-        match stage {
-            0 => components::preview(ui),
-            1 => protein::preview(ui),
-            2 => ui.show_ligand(ui.ligand.get_untracked()),
-            5 => {
-                if let Some(r) = ui.result.get_untracked() {
-                    r.preview(ui.viewer);
-                }
-            }
-            _ => (),
-        }
-    });
-    Effect::new(move |_| {
-        if ui.stage.get() < 5 {
-            return;
-        }
-        let id = [
-            "load-error",
-            "protein-error",
-            "ligand-error",
-            "composition-error",
-            "assembly-error",
-            "assembly-error",
-        ][ui.stage.get()];
-        let msg = ui.msg.get();
-        if !msg.is_empty() || id != "composition-error" {
-            notice(id, &msg);
-        }
-    });
+    view! { <Workspace ui standby /> }
 }

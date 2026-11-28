@@ -14,8 +14,8 @@ fn update(ui: Ui, f: impl FnOnce(&mut Membrane)) {
         }
     });
     ui.confirmed.update(|v| {
-        v[3] = false;
-        v[5] = false;
+        v[Page::Membrane as usize] = false;
+        v[Page::Submit as usize] = false;
     });
 }
 fn row(ui: Ui, row: Row, state: PickerState, composition: Memo<Composition>) -> impl IntoView {
@@ -192,7 +192,7 @@ pub(super) fn MembranePage(ui: Ui) -> impl IntoView {
         ui.plan
             .with(|p| p.membrane.as_ref().is_none_or(|m| m.per_leaflet))
     };
-    let built = move || ui.confirmed.get()[5] && has_membrane();
+    let built = move || ui.confirmed.get()[Page::Submit as usize] && has_membrane();
     let composition = Memo::new(move |_| {
         ui.plan.with(|p| {
             p.membrane
@@ -204,7 +204,7 @@ pub(super) fn MembranePage(ui: Ui) -> impl IntoView {
                                 m,
                                 c,
                                 r.as_ref()
-                                    .filter(|_| ui.confirmed.get()[5])
+                                    .filter(|_| ui.confirmed.get()[Page::Submit as usize])
                                     .map(|r| &r.geometry)
                                     .unwrap_or(&Value::Null),
                                 has_solute(),
@@ -244,8 +244,8 @@ pub(super) fn MembranePage(ui: Ui) -> impl IntoView {
         }
     };
     let proceed = move |_| {
-        ui.set_done(3, true);
-        ui.go(4);
+        ui.set_done(Page::Membrane, true);
+        ui.go(Page::Solvent);
     };
     let toggle = move |e: leptos::ev::Event| {
         let checked = event_target_checked(&e);
@@ -256,26 +256,12 @@ pub(super) fn MembranePage(ui: Ui) -> impl IntoView {
                 ui.saved_membrane.set_value(m);
             }
         });
-        ui.set_done(3, false);
-        ui.set_done(4, false);
-        ui.set_done(5, false);
+        ui.set_done(Page::Membrane, false);
+        ui.set_done(Page::Solvent, false);
+        ui.set_done(Page::Submit, false);
     };
     view! {
-        <div class="stage-heading">
-            <h2 id="membrane-heading" tabindex="-1">
-                "4. Membrane"
-            </h2>
-            <button
-                class="secondary help-button"
-                type="button"
-                aria-label="Help for Membrane"
-                aria-haspopup="dialog"
-                aria-controls="stage-help"
-                data-help="Choose the membrane size and the mix of lipids on each side. To skip the membrane, unselect \"Add membrane\"."
-            >
-                "?"
-            </button>
-        </div>
+        <StageHeading ui page=Page::Membrane />
         <label class="protein-check">
             <input
                 id="add-membrane"
@@ -644,8 +630,8 @@ pub(super) fn MembranePage(ui: Ui) -> impl IntoView {
                             id="edit-membrane"
                             type="button"
                             on:click=move |_| {
-                                ui.set_done(3, false);
-                                ui.set_done(5, false);
+                                ui.set_done(Page::Membrane, false);
+                                ui.set_done(Page::Submit, false);
                             }
                         >
                             "Edit..."

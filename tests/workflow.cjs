@@ -22,7 +22,7 @@ $$$$
 
 async function visit(page, base) {
     await page.goto(base);
-    await page.waitForFunction(() => !document.querySelector('#add-lipid').disabled);
+    await page.waitForFunction(() => Boolean(document.querySelector('#add-lipid:enabled')));
 }
 
 async function saveResult(page) {

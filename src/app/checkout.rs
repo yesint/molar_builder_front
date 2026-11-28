@@ -207,9 +207,8 @@ async fn run_submission(
         ligands,
         coordinates: coordinates.into(),
     };
-    ui.set_done(5, true);
-    if ui.stage.get_untracked() == 5 {
-        visible("assembly-viewer", true);
+    ui.set_done(Page::Submit, true);
+    if ui.stage.get_untracked() == Page::Submit {
         result.preview(ui.viewer);
     }
     ui.result.set(Some(result));
@@ -261,7 +260,7 @@ fn assembly_layers(ui: Ui, metadata: &Value) -> Vec<crate::viewer::Layer> {
     ));
     out
 }
-pub(super) fn setup(ui: Ui) {
+pub(super) fn checkout_return() -> Option<&'static str> {
     let returned = window().location().search().unwrap_or_default();
     let parameter = |name: &str| {
         returned
@@ -288,117 +287,137 @@ pub(super) fn setup(ui: Ui) {
             let _ = storage.set_item(&format!("molar-cancelled-{order}"), "true");
         }
     }
-    if matches!(outcome.as_deref(), Some("return" | "cancel")) {
-        notice(
-            "checkout-return",
-            if returned.contains("cancel") {
-                "You cancelled checkout. You can resume it in the builder tab where you submitted the job."
-            } else {
-                "You returned from PayPal. The builder tab where you submitted the job shows its progress."
-            },
-        );
+    match outcome.as_deref() {
+        Some("cancel") => Some(
+            "You cancelled checkout. You can resume it in the builder tab where you submitted the job.",
+        ),
+        Some("return") => Some(
+            "You returned from PayPal. The builder tab where you submitted the job shows its progress.",
+        ),
+        _ => None,
     }
-    let terms = el("public-beta-terms");
-    let fee = el("submission-fee");
-    let children = terms.children();
-    for i in 0..children.length() {
-        fee.append_child(
-            &children
-                .item(i)
-                .unwrap()
-                .clone_node_with_deep(true)
-                .unwrap(),
-        )
-        .unwrap();
-    }
-    el("force-field-download")
-        .set_attribute("href", &api::url("/api/assembly/force-field.zip"))
-        .unwrap();
-    mount("submit-summary", move || {
-        move || {
-            let p = ui.plan.get();
-            let flags = ui.confirmed.get();
-            let mut steps = vec![];
-            if ui.has_protein() && flags[1] {
-                let mut details = vec![];
-                if p.protein.orient && p.membrane.is_some() {
-                    details.push("orientation".to_string());
-                }
-                for m in p.protein.mutations {
-                    details.push(format!(
-                        "resindex {} → {}",
-                        m["residue"],
-                        m["target"].as_str().unwrap_or("")
-                    ));
-                }
-                for m in p.protein.ptms {
-                    let name = if m["iupac"].as_str().is_some_and(|s| !s.is_empty()) {
-                        "glycan".to_owned()
-                    } else {
-                        m["type"].as_str().unwrap_or("").replace('_', " ")
-                    };
-                    if !details.contains(&name) {
-                        details.push(name);
-                    }
-                }
-                if !p.protein.ss_bonds.is_empty() {
-                    details.push("disulfide bonds".into());
-                }
-                steps.push(with_details("Prepare protein", &details));
+}
+fn summary(ui: Ui) -> impl IntoView {
+    move || {
+        let p = ui.plan.get();
+        let flags = ui.confirmed.get();
+        let mut steps = vec![];
+        if ui.has_protein() && flags[Page::Protein as usize] {
+            let mut details = vec![];
+            if p.protein.orient && p.membrane.is_some() {
+                details.push("orientation".to_string());
             }
-            if flags[2]
-                && let Some(part) = ui.part.get()
-                && !part.ligands.is_empty()
-            {
-                let mut counts = indexmap::IndexMap::new();
-                for (name, _, _) in ligands::descriptions(ui, &part) {
-                    *counts.entry(name).or_insert(0usize) += 1;
-                }
-                let names = counts
-                    .into_iter()
-                    .map(|(name, count)| {
-                        if count == 1 {
-                            name
-                        } else {
-                            format!("{name} ×{count}")
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                steps.push(with_details("Parameterize ligands", &names));
-            }
-            if (flags[1] && ui.has_protein()) || (flags[2] && ui.has_ligands()) {
-                steps.push("Combine components".into());
-            }
-            if let Some(m) = p.membrane
-                && flags[3]
-            {
-                steps.push(with_details(
-                    "Build membrane",
-                    &m.rows.into_iter().map(|r| r.id).collect::<Vec<_>>(),
+            for m in p.protein.mutations {
+                details.push(format!(
+                    "resindex {} → {}",
+                    m["residue"],
+                    m["target"].as_str().unwrap_or("")
                 ));
             }
-            if let Some(s) = p.solvent {
-                let mut details = vec![format!("{} mol/L {}", s.concentration, s.salt)];
-                if s.neutralize {
-                    details.push("neutralize".into());
+            for m in p.protein.ptms {
+                let name = if m["iupac"].as_str().is_some_and(|s| !s.is_empty()) {
+                    "glycan".to_owned()
+                } else {
+                    m["type"].as_str().unwrap_or("").replace('_', " ")
+                };
+                if !details.contains(&name) {
+                    details.push(name);
                 }
-                steps.push(with_details("Add solvent and ions", &details));
             }
-            steps.extend([
-                "Minimize assembled system".into(),
-                "Load final system".into(),
-            ]);
-            steps
-                .into_iter()
-                .map(|s| view! { <li>{s}</li> })
-                .collect_view()
+            if !p.protein.ss_bonds.is_empty() {
+                details.push("disulfide bonds".into());
+            }
+            steps.push(with_details("Prepare protein", &details));
         }
-    });
+        if flags[Page::Ligands as usize]
+            && let Some(part) = ui.part.get()
+            && !part.ligands.is_empty()
+        {
+            let mut counts = indexmap::IndexMap::new();
+            for (name, _, _) in ligands::descriptions(ui, &part) {
+                *counts.entry(name).or_insert(0usize) += 1;
+            }
+            let names = counts
+                .into_iter()
+                .map(|(name, count)| {
+                    if count == 1 {
+                        name
+                    } else {
+                        format!("{name} ×{count}")
+                    }
+                })
+                .collect::<Vec<_>>();
+            steps.push(with_details("Parameterize ligands", &names));
+        }
+        if (flags[Page::Protein as usize] && ui.has_protein())
+            || (flags[Page::Ligands as usize] && ui.has_ligands())
+        {
+            steps.push("Combine components".into());
+        }
+        if let Some(m) = p.membrane
+            && flags[Page::Membrane as usize]
+        {
+            steps.push(with_details(
+                "Build membrane",
+                &m.rows.into_iter().map(|r| r.id).collect::<Vec<_>>(),
+            ));
+        }
+        if let Some(s) = p.solvent {
+            let mut details = vec![format!("{} mol/L {}", s.concentration, s.salt)];
+            if s.neutralize {
+                details.push("neutralize".into());
+            }
+            steps.push(with_details("Add solvent and ions", &details));
+        }
+        steps.extend([
+            "Minimize assembled system".into(),
+            "Load final system".into(),
+        ]);
+        steps
+            .into_iter()
+            .map(|s| view! { <li>{s}</li> })
+            .collect_view()
+    }
+}
+fn build_log(ui: Ui) -> impl IntoView {
+    move || {
+        let entries = ui.logs.get();
+        let finished = ui.confirmed.get()[Page::Submit as usize];
+        let error = !ui.msg.get().is_empty() && !ui.busy.get();
+        entries
+            .iter()
+            .enumerate()
+            .map(|(i, (started, name))| {
+                let end = entries.get(i + 1).map(|r| r.0);
+                let (state, marker) = if end.is_some() || finished {
+                    ("done", "✓")
+                } else if error {
+                    ("failed", "×")
+                } else {
+                    ("running", "…")
+                };
+                let duration = end.map(|next| elapsed(next - started)).unwrap_or_default();
+                view! {
+                    <li data-state=state>
+                        <div class="log-line">
+                            <span class="stage-mark">{marker}</span>
+                            <span>{name.clone()}</span>
+                            <time>{duration}</time>
+                        </div>
+                    </li>
+                }
+            })
+            .collect_view()
+    }
+}
+#[component]
+pub(super) fn SubmitPage(ui: Ui) -> impl IntoView {
+    let archive_notice = RwSignal::new(String::new());
     let popup = StoredValue::new_local(None::<web_sys::Window>);
     let waiting = RwSignal::new(false);
-    click("assemble-system", move || {
+    let submit = move |_| {
         let h = ui.health.get_untracked();
-        if !ui.ready() || !ui.confirmed.get_untracked()[4] {
+        if !ui.ready() || !ui.confirmed.get_untracked()[Page::Solvent as usize] {
             return;
         }
         let window = if h["mode"] == "local" {
@@ -425,25 +444,26 @@ pub(super) fn setup(ui: Ui) {
             waiting.set(false);
             result
         });
-    });
-    click("cancel-checkout", move || {
+    };
+    let cancel = move |_| {
         if let Some(w) = popup.get_value() {
             let _ = w.close();
         }
         waiting.set(false);
-    });
+    };
     let unsaved = RwSignal::new(false);
     Effect::new(move |_| {
         if ui.result.get().is_some() {
             unsaved.set(true);
         }
     });
-    listen(window().as_ref(), "beforeunload", move |event| {
+    let unload = window_event_listener(leptos::ev::beforeunload, move |event| {
         if unsaved.get_untracked() || ui.busy.get_untracked() {
             event.prevent_default();
         }
     });
-    click("assembly-download", move || {
+    on_cleanup(move || unload.remove());
+    let save = move |_| {
         if let Some(r) = ui.result.get_untracked() {
             spawn_local(async move {
                 match save_file(&r.name, &r.archive).await {
@@ -455,108 +475,135 @@ pub(super) fn setup(ui: Ui) {
                                     let _ = storage.remove_item(&r.storage_key);
                                 }
                             }
-                            Err(error) => notice(
-                                "archive-notice",
-                                &format!(
-                                    "The ZIP was saved. The server could not release its copy: {error}"
-                                ),
-                            ),
+                            Err(error) => archive_notice.set(format!(
+                                "The ZIP was saved. The server could not release its copy: {error}"
+                            )),
                         }
                     }
                     Err(e) => ui.msg.set(e),
                 }
             });
         }
-    });
-    click("retry-viewer", move || {
+    };
+    let retry = move |_| {
         if let Some(r) = ui.result.get_untracked() {
             r.preview(ui.viewer);
         }
-    });
-    mount("assembly-log", move || {
-        move || {
-            let entries = ui.logs.get();
-            let finished = ui.confirmed.get()[5];
-            let error = !ui.msg.get().is_empty() && !ui.busy.get();
-            entries
-                .iter()
-                .enumerate()
-                .map(|(i, (started, name))| {
-                    let end = entries.get(i + 1).map(|r| r.0);
-                    let (state, marker) = if end.is_some() || finished {
-                        ("done", "✓")
-                    } else if error {
-                        ("failed", "×")
-                    } else {
-                        ("running", "…")
-                    };
-                    let duration = end.map(|next| elapsed(next - started)).unwrap_or_default();
-                    view! {
-                        <li data-state=state>
-                            <div class="log-line">
-                                <span class="stage-mark">{marker}</span>
-                                <span>{name.clone()}</span>
-                                <time>{duration}</time>
-                            </div>
-                        </li>
-                    }
-                })
-                .collect_view()
-        }
-    });
-    Effect::new(move |_| {
-        let ready = ui.ready();
-        let flags = ui.confirmed.get();
-        let busy = ui.busy.get();
-        let result = ui.result.get();
-        let done = flags[5];
-        let h = ui.health.get();
-        let mode = h["mode"].as_str();
-        enabled("assemble-system", ready && flags[4] && !busy);
-        visible("assemble-system", !done);
-        if matches!(mode, Some("sandbox" | "production")) {
-            let price = format!("USD {}", h["amount"]["value"].as_str().unwrap_or("0.50"));
-            label(
-                "assemble-system",
-                &format!("Submit and pay {price} with PayPal"),
-            );
-            for id in ["public-beta-terms", "submission-fee"] {
-                if let Ok(Some(node)) = el(id).query_selector("[data-build-price]") {
-                    node.set_text_content(Some(&price));
+    };
+    let done = move || ui.confirmed.get()[Page::Submit as usize];
+    view! {
+        <StageHeading ui page=Page::Submit />
+        <ol id="submit-summary" aria-label="Planned build steps">
+            {summary(ui)}
+        </ol>
+        <div id="submission-fee" class="notice">
+            <BetaTerms ui />
+        </div>
+        <div class="actions">
+            <button
+                id="assemble-system"
+                type="button"
+                disabled=move || {
+                    !ui.ready() || !ui.confirmed.get()[Page::Solvent as usize] || ui.busy.get()
                 }
-            }
-        }
-        visible("assembly-progress", busy && ui.stage.get() == 5);
-        visible("assembly-log", !ui.logs.with(Vec::is_empty));
-        visible(
-            "cancel-checkout",
-            waiting.get()
-                && ui.logs.with(|v| {
-                    v.last()
-                        .is_some_and(|r| r.1.starts_with("Waiting for PayPal"))
-                }),
-        );
-        visible("assembly-unsaved-warning", unsaved.get());
-        visible("assembly-download", result.is_some());
-        label(
-            "assembly-download",
-            if done {
-                "Save ZIP"
-            } else {
-                "Save previous ZIP"
-            },
-        );
-        visible("assembly-viewer", done);
-        visible("build-total", done);
-        if let Some(r) = &result {
-            label("build-duration", &elapsed(r.elapsed));
-        }
-        if let Some((_, last)) = ui.logs.with(|v| v.last().cloned()) {
-            label("assembly-status", &last);
-        }
-
-        visible("retry-viewer", done && !ui.msg.get().is_empty());
-    });
+                hidden=done
+                on:click=submit
+            >
+                {move || {
+                    if ui.paid() {
+                        format!("Submit and pay {} with PayPal", ui.price())
+                    } else {
+                        "Submit".into()
+                    }
+                }}
+            </button>
+            <button
+                id="cancel-checkout"
+                class="secondary"
+                type="button"
+                hidden=move || {
+                    !(waiting.get()
+                        && ui
+                            .logs
+                            .with(|v| {
+                                v.last().is_some_and(|r| r.1.starts_with("Waiting for PayPal"))
+                            }))
+                }
+                on:click=cancel
+            >
+                "Cancel checkout"
+            </button>
+            <p
+                id="assembly-unsaved-warning"
+                class="notice"
+                role="status"
+                hidden=move || !unsaved.get()
+            >
+                "If you reload or close this tab before saving the ZIP, you will lose the result."
+            </p>
+            <button
+                id="assembly-download"
+                type="button"
+                aria-describedby="assembly-unsaved-warning"
+                hidden=move || ui.result.with(Option::is_none)
+                on:click=save
+            >
+                {move || if done() { "Save ZIP" } else { "Save previous ZIP" }}
+            </button>
+            <a id="assembly-archive" download="assembly.zip" hidden></a>
+            <a id="force-field-download" href=api::url("/api/assembly/force-field.zip")>
+                "Download CHARMM36 / CGenFF force field"
+            </a>
+            <button
+                id="retry-viewer"
+                type="button"
+                hidden=move || !done() || ui.msg.with(String::is_empty)
+                on:click=retry
+            >
+                "Retry viewer"
+            </button>
+        </div>
+        <p id="archive-notice" role="status" hidden=move || archive_notice.with(String::is_empty)>
+            {move || archive_notice.get()}
+        </p>
+        <p
+            id="assembly-status"
+            class="sr-only"
+            role="status"
+            hidden=move || ui.logs.with(Vec::is_empty)
+        >
+            {move || ui.logs.with(|v| v.last().map(|r| r.1.clone()))}
+        </p>
+        <ol
+            id="assembly-log"
+            class="build-log"
+            tabindex="0"
+            aria-label="Build stages"
+            aria-live="polite"
+            hidden=move || ui.logs.with(Vec::is_empty)
+        >
+            {build_log(ui)}
+        </ol>
+        <p id="build-total" hidden=move || !done()>
+            "Total build time: "
+            <time id="build-duration">
+                {move || ui.result.with(|r| r.as_ref().map(|r| elapsed(r.elapsed)))}
+            </time>
+        </p>
+        <progress
+            id="assembly-progress"
+            hidden=move || !ui.busy.get() || ui.stage.get() != Page::Submit
+        ></progress>
+        <p
+            id="assembly-error"
+            class="error"
+            role="alert"
+            hidden=move || ui.msg.with(String::is_empty)
+        >
+            {move || ui.msg.get()}
+        </p>
+        <ViewerSurface ui panel=Panel::Assembly />
+    }
 }
 fn with_details(label: &str, details: &[String]) -> String {
     if details.is_empty() {

@@ -58,25 +58,32 @@ struct PreviewLayer {
     rep: u64,
     visible: bool,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Panel {
+    Load,
+    Protein,
+    Ligand,
+    Assembly,
+}
 pub enum Action {
     Show(Scene),
-    Preview(&'static str, Vec<Preview>),
+    Preview(Panel, Vec<Preview>),
     Edit(bool),
     Save(futures_channel::oneshot::Sender<Result<(), String>>),
 }
 impl Action {
-    fn panel(&self) -> Option<web_sys::Element> {
-        let id = match self {
-            Action::Preview(id, _) => *id,
-            Action::Show(scene) if scene.ligand.is_some() => "ligand-viewer",
-            Action::Show(_) => "assembly-viewer",
-            Action::Edit(_) | Action::Save(_) => return None,
-        };
-        document().get_element_by_id(id)
+    fn panel(&self) -> Option<Panel> {
+        match self {
+            Self::Preview(panel, _) => Some(*panel),
+            Self::Show(scene) if scene.ligand.is_some() => Some(Panel::Ligand),
+            Self::Show(_) => Some(Panel::Assembly),
+            Self::Edit(_) | Self::Save(_) => None,
+        }
     }
 }
 #[derive(Clone, Copy)]
 pub struct Viewer {
+    pub status: [RwSignal<&'static str>; 4],
     tx: StoredValue<UnboundedSender<Action>, LocalStorage>,
 }
 impl Viewer {
@@ -85,6 +92,7 @@ impl Viewer {
         (
             Self {
                 tx: StoredValue::new_local(tx),
+                status: std::array::from_fn(|_| RwSignal::new("idle")),
             },
             rx,
         )
@@ -429,6 +437,7 @@ async fn watch_edits(
 pub async fn serve(
     canvas: HtmlCanvasElement,
     mut actions: UnboundedReceiver<Action>,
+    viewer: Viewer,
     plan: RwSignal<Plan>,
     message: RwSignal<String>,
     editing: RwSignal<bool>,
@@ -461,16 +470,16 @@ pub async fn serve(
             }
         }
         let panel = action.panel();
-        if let Some(panel) = &panel {
-            let _ = panel.set_attribute("data-state", "updating");
+        if let Some(panel) = panel {
+            viewer.status[panel as usize].set("updating");
         }
         if let Err(error) = controller.apply(action).await {
             if let Some(p) = panel {
-                let _ = p.set_attribute("data-state", "unavailable");
+                viewer.status[p as usize].set("unavailable");
             }
             message.set(error);
         } else if let Some(p) = panel {
-            let _ = p.set_attribute("data-state", "rendered");
+            viewer.status[p as usize].set("rendered");
         }
     }
 }

@@ -87,14 +87,17 @@ pub(super) fn details(ui: Ui, built: bool) -> Vec<Layer> {
 }
 pub(super) fn preview(ui: Ui) {
     let Some(p) = ui.part.get() else {
-        ui.viewer.send(Action::Preview("protein-viewer", vec![]));
+        ui.viewer.send(Action::Preview(Panel::Protein, vec![]));
         return;
     };
     if p.protein.is_null() {
-        ui.viewer.send(Action::Preview("protein-viewer", vec![]));
+        ui.viewer.send(Action::Preview(Panel::Protein, vec![]));
         return;
     }
-    let completed = ui.result.get().filter(|_| ui.confirmed.get()[5]);
+    let completed = ui
+        .result
+        .get()
+        .filter(|_| ui.confirmed.get()[Page::Submit as usize]);
     let prepared = completed.as_ref().and_then(|r| r.prepared.clone());
     let report = completed
         .as_ref()
@@ -141,11 +144,11 @@ pub(super) fn preview(ui: Ui) {
             )],
         });
     }
-    ui.viewer.send(Action::Preview("protein-viewer", models));
+    ui.viewer.send(Action::Preview(Panel::Protein, models));
 }
 pub(super) fn changed(ui: Ui) {
-    ui.set_done(1, false);
-    ui.set_done(5, false);
+    ui.set_done(Page::Protein, false);
+    ui.set_done(Page::Submit, false);
 }
 fn filtered(ui: Ui, kind: &str, query: &str) -> Vec<(String, String)> {
     let rows = inventory(ui);
@@ -256,11 +259,9 @@ fn bond_control(ui: Ui, rows: &[Value], b: Value) -> Option<impl IntoView + use<
                 type="checkbox"
                 prop:checked=move || ui.plan.with(|p| p.protein.ss_bonds.contains(&pair))
                 disabled=move || {
-                    ui
-                        .plan
+                    ui.plan
                         .with(|p| {
-                            p
-                                .protein
+                            p.protein
                                 .ptms
                                 .iter()
                                 .any(|m| {
@@ -704,21 +705,7 @@ pub(super) fn ProteinPage(ui: Ui) -> impl IntoView {
             .find(|k| !filtered(ui, k, "").is_empty())
     };
     view! {
-        <div class="stage-heading">
-            <h2 id="proteins-heading" tabindex="-1">
-                "2. Protein"
-            </h2>
-            <button
-                class="secondary help-button"
-                type="button"
-                aria-label="Help for Protein"
-                aria-haspopup="dialog"
-                aria-controls="stage-help"
-                data-help="Choose any changes you want to make to your protein. If you are adding a membrane, select \"Orient\" to align the protein with it."
-            >
-                "?"
-            </button>
-        </div>
+        <StageHeading ui page=Page::Protein />
         <div class="protein-layout">
             <div class="protein-controls">
                 <fieldset id="protein-options" disabled=inactive>
@@ -814,8 +801,10 @@ pub(super) fn ProteinPage(ui: Ui) -> impl IntoView {
                             type="button"
                             disabled=inactive
                             on:click=move |_| {
-                                ui.set_done(1, true);
-                                ui.go(if ui.has_ligands() { 2 } else { 3 });
+                                ui.set_done(Page::Protein, true);
+                                ui.go(
+                                    if ui.has_ligands() { Page::Ligands } else { Page::Membrane },
+                                );
                             }
                         >
                             "Continue"
@@ -824,7 +813,9 @@ pub(super) fn ProteinPage(ui: Ui) -> impl IntoView {
                             id="protein-built"
                             class="tree-check"
                             role="status"
-                            hidden=move || !ui.confirmed.get()[5] || !ui.has_protein()
+                            hidden=move || {
+                                !ui.confirmed.get()[Page::Submit as usize] || !ui.has_protein()
+                            }
                         >
                             "✓"
                         </span>
@@ -841,7 +832,7 @@ pub(super) fn ProteinPage(ui: Ui) -> impl IntoView {
                     {move || ui.msg.get()}
                 </p>
             </div>
-            <div id="protein-viewer" class="structure-viewer" aria-label="Protein structure"></div>
+            <ViewerSurface ui panel=Panel::Protein />
         </div>
         <MutationPicker ui modal=mutation query=mutation_query />
         <PtmPicker ui modal=ptm query=ptm_query kind />

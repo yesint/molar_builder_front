@@ -119,23 +119,18 @@ fn results(ui: Ui, search: RwSignal<String>) -> impl IntoView {
 pub(super) fn LigandsPage(ui: Ui) -> impl IntoView {
     Effect::new(move |_| {
         if ui.editing.get() {
-            ui.set_done(2, false);
-            ui.set_done(5, false);
+            ui.set_done(Page::Ligands, false);
+            ui.set_done(Page::Submit, false);
         }
     });
     let search = RwSignal::new(String::new());
-    let editable = move || {
-        ui.part.with(|p| {
-            p.as_ref()
-                .is_some_and(|p| (0..p.ligands.len()).any(|i| !water(p, i)))
-        })
-    };
+    let editable = move || ui.has_editable_ligands();
     let save = move |_| {
         ui.task(async move {
             ui.viewer.save().await?;
             ui.viewer.send(Action::Edit(false));
-            ui.set_done(2, true);
-            ui.go(3);
+            ui.set_done(Page::Ligands, true);
+            ui.go(Page::Membrane);
             Ok(())
         })
     };
@@ -153,21 +148,7 @@ pub(super) fn LigandsPage(ui: Ui) -> impl IntoView {
         }
     };
     view! {
-        <div class="stage-heading">
-            <h2 id="ligands-heading" tabindex="-1">
-                "3. Ligands"
-            </h2>
-            <button
-                class="secondary help-button"
-                type="button"
-                aria-label="Help for Ligands"
-                aria-haspopup="dialog"
-                aria-controls="stage-help"
-                data-help="Review the small molecules you chose. You can edit their atoms and bonds. Make sure each molecule has all its hydrogens before you continue."
-            >
-                "?"
-            </button>
-        </div>
+        <StageHeading ui page=Page::Ligands />
         <p class="small">
             "All ligand hydrogens must be present; missing hydrogens will cause parameterization to fail."
         </p>
@@ -228,7 +209,7 @@ pub(super) fn LigandsPage(ui: Ui) -> impl IntoView {
                     {move || ui.msg.get()}
                 </p>
             </div>
-            <div id="ligand-viewer" class="structure-viewer" hidden=move || !editable()></div>
+            <ViewerSurface ui panel=Panel::Ligand />
         </div>
     }
 }

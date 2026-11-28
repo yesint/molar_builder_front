@@ -22,7 +22,18 @@ The deployed frontend uses the payment mode and price reported by the backend. L
 
 ## Source and checks
 
-The step views live in `src/app/`. The viewer controller in `src/viewer.rs` owns the canvas, the molecular scene, and ligand edit events. Trunk generates the JavaScript needed to load the module and call browser APIs.
+Each of the six pages is a Leptos component in `src/app/`. The pages own their input values, validation, dialogs, and event handlers. The application keeps them mounted during navigation so that an unfinished edit survives a visit to another page.
+
+| Page | Component responsibilities |
+| --- | --- |
+| Components | Read structure and ligand files, track selections per model, update the preview, and partition the selected molecules. |
+| Protein | Validate mutations, PTMs, disulfide bonds, and orientation. The glycan editor owns its graph, edit history, and IUPAC input. |
+| Ligands | Filter the partitioned ligands, edit the selected molecule, save its geometry, and download its parameters. |
+| Membrane | Validate composition, estimate leaflet counts, and use the same estimates for the table and both charts. |
+| Solvent | Manage hydration, salt, and neutralization settings, including drafts kept while solvent is disabled. |
+| Submit | Review the plan, handle local and paid submissions, display build progress, and save the resulting archive. |
+
+`src/app/workspace.rs` owns navigation and shared dialogs. The shared build plan is defined in `src/model.rs`. The viewer controller in `src/viewer.rs` updates one molecular scene and preserves the same canvas as the user moves between pages. Trunk generates the JavaScript needed to load the module and call browser APIs.
 
 ```sh
 cargo install leptosfmt --locked
@@ -40,3 +51,5 @@ The molecular viewer is distributed under the Artistic License 2.0. [MolAR viewe
 The browser regression test submits a solvated POPC membrane and a dry methane molecule to a local Rust server. It checks leaflet counts, stage confirmation, ligand editing, final rendering, and ZIP downloads. With Playwright and Chromium installed, run `node tests/workflow.cjs`. Set `BUILDER_URL` to use a local server on another port. Set `REFERENCE_URL` to the running HTML/JS version to compare the membrane submission screen in both applications.
 
 Set `WEBGPU=1` to run the browser checks with WebGPU. The test reads the rendered frame before and after a ligand visibility change, checks that selecting the ligands restores the image, and records GPU validation errors.
+
+Run `node tests/forms.cjs` to exercise the controls across all six pages. Run `node tests/checkout.cjs` to check stage help, checkout pricing, and PayPal cancellation with simulated payment endpoints. Run the browser suites one at a time when they share a local backend because the server limits concurrent operations.

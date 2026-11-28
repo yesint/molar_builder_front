@@ -9,8 +9,8 @@ pub(super) fn SolventPage(ui: Ui) -> impl IntoView {
     let enabled = move || ui.plan.with(|p| p.solvent.is_some());
     let membrane = move || ui.plan.with(|p| p.membrane.is_some());
     let invalidate = move || {
-        ui.set_done(4, false);
-        ui.set_done(5, false);
+        ui.set_done(Page::Solvent, false);
+        ui.set_done(Page::Submit, false);
     };
     let save = move || {
         ui.plan.update(|p| p.solvent = Some(draft.get_untracked()));
@@ -36,25 +36,11 @@ pub(super) fn SolventPage(ui: Ui) -> impl IntoView {
         {
             return;
         }
-        ui.set_done(4, true);
-        ui.go(5);
+        ui.set_done(Page::Solvent, true);
+        ui.go(Page::Submit);
     };
     view! {
-        <div class="stage-heading">
-            <h2 id="solvent-heading" tabindex="-1">
-                "5. Solvent"
-            </h2>
-            <button
-                class="secondary help-button"
-                type="button"
-                aria-label="Help for Solvent"
-                aria-haspopup="dialog"
-                aria-controls="stage-help"
-                data-help="Choose how much water to add and what type and concentration of salt to use. Select \"Neutralize\" to balance the total charge. To skip adding water and salt, unselect \"Add solvent\"."
-            >
-                "?"
-            </button>
-        </div>
+        <StageHeading ui page=Page::Solvent />
         <fieldset id="assembly-options" disabled=move || ui.busy.get()>
             <label class="protein-check">
                 <input
