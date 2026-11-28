@@ -40,73 +40,7 @@
         </section>
 
         <section id="page-proteins" aria-labelledby="proteins-heading" hidden></section>
-        <section id="page-membrane" aria-labelledby="membrane-heading" hidden>
-          <div class="stage-heading">
-            <h2 id="membrane-heading" tabindex="-1">4. Membrane</h2>
-            <button class="secondary help-button" type="button" aria-label="Help for Membrane" aria-haspopup="dialog" aria-controls="stage-help"
-              data-help='Choose the membrane size and the mix of lipids on each side. To skip the membrane, unselect "Add membrane".'>?</button>
-          </div>
-          <label class="protein-check"><input id="add-membrane" type="checkbox" checked> Add membrane</label>
-          <div id="no-membrane-actions" class="actions" hidden><button id="continue-no-membrane" type="button">Continue</button></div>
-          <p id="no-membrane-note" class="small" hidden>The solute uses a rhombic dodecahedral box.</p>
-            <div id="membrane-composition" class="composition-layout">
-            <div class="composition-editor">
-            <fieldset id="composition-controls">
-            <legend class="sr-only">Membrane composition</legend>
-            <p id="protein-area-note" class="small">During the build, the protein area is subtracted from each leaflet before lipid counts are calculated.</p>
-            <p id="composition-estimate" class="small" hidden>Estimated counts and lipid areas from the entered cell size, without protein area.</p>
-            <div class="composition-scroll">
-              <table class="composition">
-                <thead><tr><th scope="col">Lipid species</th><th scope="col">Inner <span class="small column-help">Input → Normalized (lipids)</span></th><th scope="col">Outer <span class="small column-help">Input → Normalized (lipids)</span></th><th scope="col"><span class="sr-only">Remove</span></th></tr></thead>
-                <tbody id="lipid-rows"></tbody>
-                <tfoot><tr><th scope="row">Total</th><td><div class="percentage-count"><span id="inner-total" class="normalized-percentage"></span><span id="inner-total-count" class="lipid-count"></span></div></td><td><div class="percentage-count"><span id="outer-total" class="normalized-percentage"></span><span id="outer-total-count" class="lipid-count"></span></div></td><td></td></tr>
-                <tr id="area-row"><th scope="row">
-                  <div class="area-tools"><strong>Area <span class="small">(nm²)</span></strong>
-                    <div id="balance-controls" hidden>
-                      <label for="balancing-lipid" class="sr-only">Balancing lipid</label>
-                      <select id="balancing-lipid"></select>
-                      <button id="balance" class="secondary" type="button">Balance</button>
-                    </div>
-                  </div>
-                </th><td class="area-value"><span id="inner-area">—</span></td>
-                <td class="area-value"><span id="outer-area">—</span></td><td></td></tr></tfoot>
-              </table>
-            </div>
-            <button id="add-lipid" class="secondary" type="button" disabled><span aria-hidden="true">+</span> Add lipids</button>
-            <fieldset class="normalization">
-              <legend class="sr-only">Normalize percentages</legend>
-              <div class="normalization-options">
-                <label><input id="per-leaflet" type="radio" name="normalization" value="leaflet" checked> 100% per leaflet</label>
-                <label><input id="per-membrane" type="radio" name="normalization" value="total"> 100% per membrane</label>
-              </div>
-              <p id="combined-total" class="small" hidden></p>
-            </fieldset>
-            <div class="cell-size">
-              <label for="cell-size">Hexagonal cell length (nm)</label>
-              <input id="cell-size" type="number" value="6" min="3" max="12" step="0.1" required>
-            </div>
-            <div class="cell-size"><label for="xy-margin">Minimum XY margin (nm)</label><input id="xy-margin" type="number" value="1" min="0" step="0.1" required></div>
-            <p id="resolved-cell" class="small"></p>
-            <div class="actions"><button id="build" disabled>Continue</button></div>
-            </fieldset>
-            <div id="computation" hidden>
-              <p id="compute-status" role="status">Building membrane…</p>
-              <progress id="compute-progress" aria-label="Building the membrane"></progress>
-            </div>
-            <div id="built-membrane" hidden>
-              <div class="actions">
-                <button id="edit-membrane" type="button">Edit...</button>
-              </div>
-            </div>
-            <p id="composition-error" class="error" role="alert" hidden></p>
-            <p id="connection" class="error" role="status" hidden></p>
-            </div>
-            <aside class="leaflet-charts" aria-label="Lipid counts by leaflet">
-              <figure><figcaption>Inner</figcaption><svg id="inner-pie" viewBox="0 0 200 200" role="img" aria-label="Inner lipid counts"></svg><ul id="inner-legend" class="pie-legend"></ul></figure>
-              <figure><figcaption>Outer</figcaption><svg id="outer-pie" viewBox="0 0 200 200" role="img" aria-label="Outer lipid counts"></svg><ul id="outer-legend" class="pie-legend"></ul></figure>
-            </aside>
-            </div>
-        </section>
+        <section id="page-membrane" aria-labelledby="membrane-heading" hidden></section>
         <section id="page-ligands" aria-labelledby="ligands-heading" hidden></section>
         <section id="page-solvent" aria-labelledby="solvent-heading" hidden>
           <div class="stage-heading">
@@ -175,26 +109,8 @@
     </div>
     <form id="about-actions" method="dialog"><button type="submit" class="secondary compact">Close</button></form>
   </dialog>
-  <dialog id="lipid-picker" aria-labelledby="picker-heading">
-    <div class="picker-heading"><h2 id="picker-heading">Add lipids</h2><button id="close-picker" class="secondary" aria-label="Close lipid picker">×</button></div>
-    <label for="lipid-search">Search by family, subfamily, molecule, or tail composition</label>
-    <input id="lipid-search" type="search" placeholder="e.g. POPC or 18:0" autocomplete="off">
-    <div class="picker-scroll"><div class="picker-layout">
-      <div class="picker-column"><h3>Family</h3><div id="lipid-families" role="group" aria-label="Lipid family"></div></div>
-      <div class="picker-column"><h3>Subfamily</h3><div id="lipid-subfamilies" role="group" aria-label="Lipid subfamily"></div></div>
-      <div class="picker-column"><h3>Molecules</h3><div id="picker-lipids" role="group" aria-label="Molecules"></div></div>
-      <aside class="structure-preview" aria-label="Lipid chemical structure">
-        <h3>Picture</h3>
-        <div id="preview-content" hidden>
-        <h4 id="preview-name"></h4><p id="preview-tails" class="small"></p>
-        <img id="preview-image" alt="" width="180" height="350">
-        <p id="preview-error" class="small" hidden>The structure image could not be loaded.</p>
-        </div>
-      </aside>
-    </div></div>
-    <p id="no-lipids" role="status" hidden>No lipids match your search.</p>
-  </dialog>
-  <aside id="lipid-hover" class="hover-structure" hidden><strong></strong><img alt=""></aside>
+
+
 
 
 

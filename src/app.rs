@@ -229,7 +229,10 @@ fn setup(ui: Ui) {
         "page-ligands",
         move || view! { <ligands::LigandsPage ui /> },
     );
-    membrane::setup(ui);
+    mount(
+        "page-membrane",
+        move || view! { <membrane::MembranePage ui /> },
+    );
     solvent::setup(ui);
     checkout::setup(ui);
     click("open-about", || {
@@ -316,7 +319,7 @@ fn setup(ui: Ui) {
         }
     });
     Effect::new(move |_| {
-        if ui.stage.get() < 3 {
+        if ui.stage.get() < 4 {
             return;
         }
         let id = [

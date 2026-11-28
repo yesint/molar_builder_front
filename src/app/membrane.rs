@@ -1,5 +1,10 @@
 use super::*;
-use crate::viewer::PALETTE;
+mod chart;
+mod composition;
+mod picker;
+use chart::LeafletChart;
+use composition::{Composition, count_label, percent};
+use picker::{LipidPicker, PickerState};
 
 fn update(ui: Ui, f: impl FnOnce(&mut Membrane)) {
     ui.plan.update(|p| {
@@ -13,255 +18,38 @@ fn update(ui: Ui, f: impl FnOnce(&mut Membrane)) {
         v[5] = false;
     });
 }
-fn preview(l: &Lipid) {
-    label("preview-name", &l.name);
-    notice("preview-tails", &l.tails);
-    visible("preview-content", true);
-    visible("preview-image", true);
-    visible("preview-error", false);
-    let image = el("preview-image");
-    image.set_attribute("src", &l.image).unwrap();
-    image
-        .set_attribute("alt", &format!("{} chemical structure", l.name))
-        .unwrap();
-}
-fn hover(l: &Lipid) {
-    let host = el("lipid-hover");
-    host.query_selector("strong")
-        .unwrap()
-        .unwrap()
-        .set_text_content(Some(&l.name));
-    let img = host.query_selector("img").unwrap().unwrap();
-    img.set_attribute("src", &l.image).unwrap();
-    img.set_attribute("alt", &format!("{} chemical structure", l.name))
-        .unwrap();
-    visible("lipid-hover", true);
-    let rect = el(&format!("{}-name", l.id)).get_bounding_client_rect();
-    let size = host.get_bounding_client_rect();
-    let x = (rect.right() + 12.)
-        .min(window().inner_width().unwrap().as_f64().unwrap() - size.width() - 8.)
-        .max(8.);
-    let y = rect
-        .top()
-        .min(window().inner_height().unwrap().as_f64().unwrap() - size.height() - 8.)
-        .max(8.);
-    host.set_attribute("style", &format!("left:{x}px;top:{y}px"))
-        .unwrap();
-}
-fn picker(ui: Ui) {
-    let query = RwSignal::new(String::new());
-    let family = RwSignal::new(String::new());
-    let sub = RwSignal::new(String::new());
-    let matches = Memo::new(move |_| {
-        let query = query.get();
-        ui.catalog.with(|c| {
-            c.iter()
-                .filter(|l| {
-                    let hay = format!(
-                        "{} {} {} {} {} {} {}",
-                        l.id, l.name, l.family, l.subfamily, l.group, l.chemical_subfamily, l.tails
-                    )
-                    .to_lowercase();
-                    query.split_whitespace().all(|term| hay.contains(term))
-                })
-                .cloned()
-                .collect::<Vec<_>>()
-        })
-    });
-    let families = Memo::new(move |_| unique(matches.get().into_iter().map(|l| l.family)));
-    let current = Memo::new(move |_| chosen(families.get(), family.get()));
-    let subs = Memo::new(move |_| {
-        unique(
-            matches
-                .get()
-                .into_iter()
-                .filter(|l| l.family == current.get())
-                .map(|l| l.subfamily),
-        )
-    });
-    let subcurrent = Memo::new(move |_| chosen(subs.get(), sub.get()));
-    for (host, field, control, list, active, signal) in [
-        (
-            "lipid-families",
-            "family",
-            "lipid-subfamilies",
-            families,
-            current,
-            family,
-        ),
-        (
-            "lipid-subfamilies",
-            "subfamily",
-            "picker-lipids",
-            subs,
-            subcurrent,
-            sub,
-        ),
-    ] {
-        mount(host, move || {
-            move || {
-                list.get()
-                    .into_iter()
-                    .map(|name| {
-                        let key = StoredValue::new(name.clone());
-                        view! {
-                            <button
-                                class="secondary picker-choice"
-                                data-family=(field == "family").then(|| name.clone())
-                                data-subfamily=(field == "subfamily").then(|| name.clone())
-                                aria-controls=control
-                                aria-pressed=move || (active.get() == key.get_value()).to_string()
-                                on:click=move |_| {
-                                    signal.set(key.get_value());
-                                    visible("preview-content", false);
-                                }
-                            >
-                                {name.clone()}
-                            </button>
-                        }
-                    })
-                    .collect_view()
-            }
-        });
-    }
-    mount("picker-lipids", move || {
-        move || {
-            matches
-                .get()
-                .into_iter()
-                .filter(|lipid| {
-                    lipid.family == current.get() && lipid.subfamily == subcurrent.get()
-                })
-                .map(|lipid| picker_button(ui, lipid))
-                .collect_view()
-        }
-    });
-    click("add-lipid", move || {
-        field("lipid-search").set_value("");
-        query.set(String::new());
-        visible("lipid-hover", false);
-        let _ = dialog("lipid-picker").show_modal();
-        focus("lipid-search");
-    });
-    click("close-picker", || dialog("lipid-picker").close());
-    on("lipid-picker", "close", |_| {
-        visible("preview-content", false)
-    });
-    on("preview-image", "error", |_| {
-        visible("preview-image", false);
-        visible("preview-error", true);
-    });
-    on("lipid-search", "input", move |_| {
-        let q = field("lipid-search").value().trim().to_lowercase();
-        let c = ui.catalog.get_untracked();
-        if let Some(l) = c
-            .iter()
-            .find(|l| l.id.eq_ignore_ascii_case(&q))
-            .or_else(|| c.iter().find(|l| l.subfamily.eq_ignore_ascii_case(&q)))
-        {
-            family.set(l.family.clone());
-            sub.set(l.subfamily.clone());
-        }
-        query.set(q);
-        visible("preview-content", false);
-    });
-    Effect::new(move |_| {
-        visible("no-lipids", matches.get().is_empty());
-        enabled("add-lipid", !ui.catalog.with(Vec::is_empty));
-    });
-}
-fn picker_button(ui: Ui, l: Lipid) -> impl IntoView {
-    let lipid = StoredValue::new(l.clone());
-    let added = ui.plan.with(|p| {
-        p.membrane
-            .as_ref()
-            .is_some_and(|m| m.rows.iter().any(|r| r.id == l.id))
-    });
-    view! {
-        <button
-            class="secondary catalog-lipid"
-            data-lipid=l.id.clone()
-            aria-label=format!(
-                "{} {}{}",
-                if added { "Already added" } else { "Add" },
-                l.name,
-                if l.tails.is_empty() { String::new() } else { format!(", {}", l.tails) },
-            )
-            aria-disabled=added.to_string()
-            on:mouseenter=move |_| lipid.with_value(preview)
-            on:focus=move |_| lipid.with_value(preview)
-            on:mouseleave=move |_| visible("preview-content", false)
-            on:blur=move |_| visible("preview-content", false)
-            on:click=move |_| {
-                if added {
-                    return;
-                }
-                let id = lipid.get_value().id;
-                update(
-                    ui,
-                    |m| {
-                        m.rows
-                            .push(Row {
-                                id: id.clone(),
-                                lower: 0.,
-                                upper: 0.,
-                            })
-                    },
-                );
-                dialog("lipid-picker").close();
-                request_animation_frame(move || {
-                    if document()
-                        .active_element()
-                        .is_some_and(|e| e.id() == "add-lipid" || e.tag_name() == "BODY")
-                    {
-                        focus(&format!("{id}-inner"));
-                    }
-                });
-            }
-        >
-            <span>
-                {l.name.clone()}
-                {(!l.tails.is_empty())
-                    .then(|| view! { <span class="small lipid-tail">{l.tails.clone()}</span> })}
-            </span>
-            <span aria-hidden="true">{if added { "Added" } else { "+" }}</span>
-        </button>
-    }
-}
-fn unique(items: impl Iterator<Item = String>) -> Vec<String> {
-    let mut out = vec![];
-    for s in items {
-        if !out.contains(&s) {
-            out.push(s);
-        }
-    }
-    out
-}
-fn chosen(items: Vec<String>, s: String) -> String {
-    if items.contains(&s) {
-        s
-    } else {
-        items.into_iter().next().unwrap_or_default()
-    }
-}
-fn row(ui: Ui, row: Row) -> impl IntoView {
+fn row(ui: Ui, row: Row, state: PickerState, composition: Memo<Composition>) -> impl IntoView {
     let l = ui
         .catalog
         .with_untracked(|c| c.iter().find(|l| l.id == row.id).cloned().unwrap());
     let lipid = StoredValue::new(l.clone());
     let key = StoredValue::new(row.id.clone());
+    let name_ref = NodeRef::<leptos::html::Button>::new();
+    let inner = NodeRef::<leptos::html::Input>::new();
+    if state
+        .focus_row
+        .with_value(|id| id.as_ref() == Some(&row.id))
+    {
+        state.focus_row.set_value(None);
+        request_animation_frame(move || {
+            if let Some(input) = inner.get_untracked() {
+                let _ = input.focus();
+            }
+        });
+    }
     view! {
         <tr>
             <th scope="row">
                 <button
+                    node_ref=name_ref
                     id=format!("{}-name", l.id)
                     class="lipid-name"
                     aria-label=format!("{}: show chemical structure", l.name)
-                    on:mouseenter=move |_| lipid.with_value(hover)
-                    on:focus=move |_| lipid.with_value(hover)
-                    on:click=move |_| lipid.with_value(hover)
-                    on:mouseleave=move |_| visible("lipid-hover", false)
-                    on:blur=move |_| visible("lipid-hover", false)
+                    on:mouseenter=move |_| state.show_hover(lipid.get_value(), name_ref)
+                    on:focus=move |_| state.show_hover(lipid.get_value(), name_ref)
+                    on:click=move |_| state.show_hover(lipid.get_value(), name_ref)
+                    on:mouseleave=move |_| state.hover.set(None)
+                    on:blur=move |_| state.hover.set(None)
                 >
                     {l.name.clone()}
                 </button>
@@ -273,11 +61,40 @@ fn row(ui: Ui, row: Row) -> impl IntoView {
                 .enumerate()
                 .map(|(i, side)| {
                     let id = format!("{}-{side}", row.id);
+                    let input = if i == 0 { inner } else { NodeRef::new() };
+                    let values = move || {
+                        composition
+                            .with(|c| {
+                                let leaflet = &c.leaflets[i];
+                                let name = key.get_value();
+                                let j = leaflet.counts.iter().position(|(n, _, _)| *n == name);
+                                let pct = j
+                                    .and_then(|j| leaflet.weights[j])
+                                    .map(percent)
+                                    .unwrap_or_else(|| "—".into());
+                                let count = count_label(
+                                    j.filter(|_| c.valid).map(|j| leaflet.counts[j].1),
+                                );
+                                let delta = if ui
+                                    .plan
+                                    .with(|p| {
+                                        p.membrane.as_ref().and_then(|m| m.balancing_lipid.as_ref())
+                                            == Some(&name)
+                                    })
+                                {
+                                    leaflet.adjustment
+                                } else {
+                                    0
+                                };
+                                (pct, count, delta)
+                            })
+                    };
                     view! {
                         <td>
                             <div class="percentage-count">
                                 <span class="percentage-field">
                                     <input
+                                        node_ref=input
                                         type="number"
                                         min="0"
                                         step="any"
@@ -313,13 +130,26 @@ fn row(ui: Ui, row: Row) -> impl IntoView {
                                 <span
                                     class="normalized-percentage"
                                     id=format!("{id}-normalized")
-                                ></span>
+                                    aria-label=move || {
+                                        format!(
+                                            "{} {side} normalized percentage: {}",
+                                            key.get_value(),
+                                            values().0,
+                                        )
+                                    }
+                                >
+                                    {move || values().0}
+                                </span>
                                 <span
                                     class="lipid-adjustment"
-                                    hidden
+                                    hidden=move || values().2 == 0
                                     id=format!("{id}-adjustment")
-                                ></span>
-                                <span class="lipid-count" id=format!("{id}-count")></span>
+                                >
+                                    {move || format!("{:+}", values().2)}
+                                </span>
+                                <span class="lipid-count" id=format!("{id}-count")>
+                                    {move || values().1}
+                                </span>
                             </div>
                         </td>
                     }
@@ -331,8 +161,10 @@ fn row(ui: Ui, row: Row) -> impl IntoView {
                     aria-label=format!("Remove {}", row.id)
                     on:click=move |_| {
                         update(ui, |m| m.rows.retain(|r| r.id != key.get_value()));
-                        visible("lipid-hover", false);
-                        focus("add-lipid");
+                        state.hover.set(None);
+                        if let Some(b) = state.button.get_untracked() {
+                            let _ = b.focus();
+                        }
                     }
                 >
                     "×"
@@ -341,354 +173,84 @@ fn row(ui: Ui, row: Row) -> impl IntoView {
         </tr>
     }
 }
-fn svg(tag: &str, attrs: &[(&str, String)]) -> web_sys::Element {
-    let e = document()
-        .create_element_ns(Some("http://www.w3.org/2000/svg"), tag)
-        .unwrap();
-    for (k, v) in attrs {
-        e.set_attribute(k, v).unwrap();
-    }
-    e
-}
-fn chart(side: &str, counts: &[(String, u32, usize)]) {
-    let chart = el(&format!("{side}-pie"));
-    let legend = el(&format!("{side}-legend"));
-    chart.set_text_content(None);
-    legend.set_text_content(None);
-    let counts: Vec<_> = counts.iter().filter(|(_, count, _)| *count > 0).collect();
-    let total: u32 = counts.iter().map(|(_, n, _)| n).sum();
-    chart
-        .set_attribute("data-total", &total.to_string())
-        .unwrap();
-    let description = if counts.is_empty() {
-        "no computed counts".into()
-    } else {
-        counts
-            .iter()
-            .map(|(id, n, _)| format!("{id} {n}"))
-            .collect::<Vec<_>>()
-            .join(", ")
+#[component]
+pub(super) fn MembranePage(ui: Ui) -> impl IntoView {
+    let state = PickerState::new();
+    let scroll = window_event_listener(leptos::ev::scroll, move |_| state.hover.set(None));
+    let escape = window_event_listener(leptos::ev::keydown, move |e| {
+        if e.key() == "Escape" {
+            state.hover.set(None);
+        }
+    });
+    on_cleanup(move || {
+        scroll.remove();
+        escape.remove();
+    });
+    let has_solute = move || ui.has_protein() || ui.has_ligands();
+    let has_membrane = move || ui.plan.with(|p| p.membrane.is_some());
+    let per_leaflet = move || {
+        ui.plan
+            .with(|p| p.membrane.as_ref().is_none_or(|m| m.per_leaflet))
     };
-    chart
-        .set_attribute(
-            "aria-label",
-            &format!(
-                "{}: {description}",
-                if side == "inner" { "Inner" } else { "Outer" }
-            ),
-        )
-        .unwrap();
-    let circle = |color: &str| {
-        svg(
-            "circle",
-            &[
-                ("cx", "100".into()),
-                ("cy", "100".into()),
-                ("r", "92".into()),
-                ("fill", color.into()),
-            ],
-        )
-    };
-    if total == 0 {
-        chart.append_child(&circle("#ecf0ed")).unwrap();
-        let dash = svg(
-            "text",
-            &[
-                ("x", "100".into()),
-                ("y", "106".into()),
-                ("text-anchor", "middle".into()),
-                ("fill", "#52615c".into()),
-            ],
-        );
-        dash.set_text_content(Some("—"));
-        chart.append_child(&dash).unwrap();
-        return;
-    }
-    let mut angle = -std::f64::consts::FRAC_PI_2;
-    let point = |a: f64| format!("{} {}", 100. + 92. * a.cos(), 100. + 92. * a.sin());
-    for (id, n, i) in counts {
-        let color = PALETTE[i % PALETTE.len()];
-        let end = angle + std::f64::consts::TAU * f64::from(*n) / f64::from(total);
-        let slice = if *n == total {
-            circle(color)
+    let built = move || ui.confirmed.get()[5] && has_membrane();
+    let composition = Memo::new(move |_| {
+        ui.plan.with(|p| {
+            p.membrane
+                .as_ref()
+                .map(|m| {
+                    ui.catalog.with(|c| {
+                        ui.result.with(|r| {
+                            Composition::calculate(
+                                m,
+                                c,
+                                r.as_ref()
+                                    .filter(|_| ui.confirmed.get()[5])
+                                    .map(|r| &r.geometry)
+                                    .unwrap_or(&Value::Null),
+                                has_solute(),
+                            )
+                        })
+                    })
+                })
+                .unwrap_or_default()
+        })
+    });
+    let error = move || {
+        let msg = ui.msg.get();
+        if msg.is_empty() {
+            composition.with(|c| c.error.clone())
         } else {
-            svg(
-                "path",
-                &[
-                    (
-                        "d",
-                        format!(
-                            "M 100 100 L {} A 92 92 0 {} 1 {} Z",
-                            point(angle),
-                            u8::from(end - angle > std::f64::consts::PI),
-                            point(end)
-                        ),
-                    ),
-                    ("fill", color.into()),
-                    ("stroke", "white".into()),
-                    ("stroke-width", "1".into()),
-                ],
-            )
-        };
-        angle = end;
-        slice.set_attribute("data-lipid", id).unwrap();
-        slice.set_attribute("data-count", &n.to_string()).unwrap();
-        let title = svg("title", &[]);
-        title.set_text_content(Some(&format!("{id}: {n}")));
-        slice.append_child(&title).unwrap();
-        chart.append_child(&slice).unwrap();
-        let li = document().create_element("li").unwrap();
-        for (class, text) in [
-            ("pie-key", String::new()),
-            ("", id.clone()),
-            ("pie-value", n.to_string()),
-        ] {
-            let span = document().create_element("span").unwrap();
-            span.set_class_name(class);
-            span.set_text_content(Some(&text));
-            if class == "pie-key" {
-                span.set_attribute("style", &format!("background:{color}"))
-                    .unwrap();
-            }
-            li.append_child(&span).unwrap();
+            msg
         }
-        legend.append_child(&li).unwrap();
-    }
-}
-fn percent(n: f64) -> String {
-    format!("{}%", (n * 1000.).round() / 1000.)
-}
-fn refresh(ui: Ui, m: &Membrane, c: &[Lipid]) {
-    let normalized = m.normalized(c).unwrap_or_default();
-    let geometry = ui.result.with(|r| {
-        r.as_ref()
-            .filter(|_| ui.confirmed.get()[5])
-            .map(|r| r.geometry.clone())
-            .unwrap_or(Value::Null)
-    });
-    let estimates = m.estimates(c, &geometry).and_then(|v| {
-        if !field("cell-size").check_validity() {
-            Err("Enter a valid cell length, in steps of 0.1 nm.".into())
-        } else if !field("xy-margin").check_validity() {
-            Err("Enter a finite, nonnegative XY margin.".into())
-        } else {
-            if !v.iter().any(|(_, lo, _)| *lo > 0) || !v.iter().any(|(_, _, up)| *up > 0) {
-                return Err("The cell is too small for a lipid in each leaflet.".into());
-            }
-            Ok(v)
-        }
-    });
-    let mut error = estimates.as_ref().err().cloned().unwrap_or_default();
-    let mut estimates = estimates.unwrap_or_default();
-    let mut area = [0.; 2];
-    for (r, l, u) in &estimates {
-        let a = c.iter().find(|v| v.id == r.id).unwrap().area_nm2;
-        area[0] += a * f64::from(*l);
-        area[1] += a * f64::from(*u);
-    }
-    let protein_area =
-        ["lower", "upper"].map(|side| geometry["protein_areas"][side].as_f64().unwrap_or(0.));
-    let total_counts = estimates
-        .iter()
-        .fold([0, 0], |[lo, up], (_, l, u)| [lo + *l, up + *u]);
-    let mut delta = [0i32; 2];
-    if let Some(id) = &m.balancing_lipid
-        && let Some((_, l, u)) = estimates.iter_mut().find(|(r, _, _)| r.id == *id)
-    {
-        let a = c.iter().find(|v| v.id == *id).unwrap().area_nm2;
-        let larger = usize::from(area[1] + protein_area[1] > area[0] + protein_area[0]);
-        let gap = (area[0] + protein_area[0] - area[1] - protein_area[1]).abs();
-        let total = total_counts[larger] as i32;
-        let take = ([*l, *u][larger] as i32).min(total - 1);
-        let mut best = gap;
-        for n in [(gap / a).floor() as i32, (gap / a).ceil() as i32, take] {
-            if n <= 0 {
-                continue;
-            }
-            for side in [larger, 1 - larger] {
-                if side == larger && n > take {
-                    continue;
-                }
-                let residual = (gap - a * f64::from(n)).abs();
-                if residual < best - 1e-9 {
-                    best = residual;
-                    delta = [0; 2];
-                    delta[side] = if side == larger { -n } else { n };
-                }
-            }
-        }
-        if delta == [0, 0] {
-            error = "No whole-lipid adjustment can reduce the area difference.".into();
-        }
-        *l = l.saturating_add_signed(delta[0]);
-        *u = u.saturating_add_signed(delta[1]);
-        for i in 0..2 {
-            area[i] += f64::from(delta[i]) * a;
-        }
-    }
-    let estimated = (ui.has_protein() || ui.has_ligands()) && geometry.is_null();
-    let resolved = geometry["xy_diameter_nm"].as_f64().map(|d| {
-        m.size_nm
-            .max(((d + 2. * m.margin_nm) / (3f64.sqrt() / 2.) * 10.).ceil() / 10.)
-            .max(geometry["minimum_cell_size_nm"].as_f64().unwrap_or(0.))
-    });
-    label(
-        "resolved-cell",
-        &resolved
-            .map(|s| format!("Cell length after orientation: {s:.1} nm"))
-            .unwrap_or_default(),
-    );
-    let total_area = [area[0] + protein_area[0], area[1] + protein_area[1]];
-    visible("composition-estimate", estimated && !estimates.is_empty());
-    notice(
-        "composition-error",
-        if m.rows.is_empty() { "" } else { &error },
-    );
-    let valid = !estimates.is_empty();
-    let mismatch = if total_area[0].min(total_area[1]) > 0. {
-        100. * (total_area[0] - total_area[1]).abs() / total_area[0].min(total_area[1])
-    } else {
-        0.
     };
-    visible("balance-controls", valid && mismatch > 5.);
-    options(
-        "balancing-lipid",
-        m.rows
-            .iter()
-            .filter(|r| r.lower + r.upper > 0.)
-            .map(|r| (r.id.clone(), r.id.clone())),
-    );
-    enabled("balance", valid && m.balancing_lipid.is_none());
-    for (i, side) in ["inner", "outer"].into_iter().enumerate() {
-        let mut counts = vec![];
-        let mut sum = 0.;
-        for (j, r) in m.rows.iter().enumerate() {
-            let id = format!("{}-{side}", r.id);
-            if document()
-                .get_element_by_id(&(id.clone() + "-count"))
-                .is_none()
-            {
-                continue;
-            }
-            let value = normalized
+    let balance_choice = RwSignal::new(String::new());
+    let balance_options = move || {
+        ui.plan.with(|p| {
+            p.membrane
                 .iter()
-                .find(|n| n.id == r.id)
-                .map(|n| if i == 0 { n.lower } else { n.upper })
-                .or((!normalized.is_empty()).then_some(0.));
-            let pct = value.map(percent).unwrap_or_else(|| "—".into());
-            label(&(id.clone() + "-normalized"), &pct);
-            sum += value.unwrap_or_default();
-            el(&(id.clone() + "-normalized"))
-                .set_attribute(
-                    "aria-label",
-                    &format!("{} {side} normalized percentage: {pct}", r.id),
-                )
-                .unwrap();
-            let count = estimates
-                .iter()
-                .find(|(n, _, _)| n.id == r.id)
-                .map(|(_, l, u)| if i == 0 { *l } else { *u })
-                .unwrap_or_default();
-            counts.push((r.id.clone(), count, j));
-            label(
-                &(id.clone() + "-count"),
-                &if valid {
-                    format!("({count})")
-                } else {
-                    "(—)".into()
-                },
-            );
-            let d = if m.balancing_lipid.as_ref() == Some(&r.id) {
-                delta[i]
-            } else {
-                0
-            };
-            notice(
-                &(id + "-adjustment"),
-                &if d == 0 {
-                    String::new()
-                } else {
-                    format!("{d:+}")
-                },
-            );
-        }
-        chart(side, &counts);
-        label(
-            &format!("{side}-total"),
-            &if normalized.is_empty() {
-                "—".into()
-            } else {
-                percent(sum)
-            },
-        );
-        label(
-            &format!("{side}-total-count"),
-            &if valid {
-                format!("({})", counts.iter().map(|(_, n, _)| n).sum::<u32>())
-            } else {
-                "(—)".into()
-            },
-        );
-        let id = format!("{side}-area");
-        label(
-            &id,
-            &if valid {
-                format!("{:.3}", area[i])
-            } else {
-                "—".into()
-            },
-        );
-        if total_area[i] > total_area[1 - i] {
-            let excess = document().create_element("span").unwrap();
-            excess.set_class_name("area-excess");
-            excess.set_text_content(Some(&format!("(+{}%)", (100. * mismatch).round() / 100.)));
-            el(&id).append_child(&excess).unwrap();
-        }
-    }
-    notice(
-        "combined-total",
-        if m.per_leaflet {
-            ""
-        } else if normalized.is_empty() {
-            "Normalized membrane total: —"
+                .flat_map(|m| &m.rows)
+                .filter(|r| r.upper + r.lower > 0.)
+                .map(|r| r.id.clone())
+                .collect::<Vec<_>>()
+        })
+    };
+    let balance_id = move || {
+        let options = balance_options();
+        let choice = balance_choice.get();
+        if options.contains(&choice) {
+            Some(choice)
         } else {
-            "Normalized membrane total: 100%"
-        },
-    );
-    enabled("build", valid && ui.components_ready() && !ui.busy.get());
-}
-pub(super) fn setup(ui: Ui) {
-    picker(ui);
-    Effect::new(move |_| {
-        let built = ui.confirmed.get()[5] && ui.plan.with(|p| p.membrane.is_some());
-        visible("built-membrane", built);
-        visible("composition-controls", !built);
-    });
-    listen(window().as_ref(), "scroll", |_| {
-        visible("lipid-hover", false)
-    });
-    listen(window().as_ref(), "keydown", |e| {
-        if e.dyn_ref::<web_sys::KeyboardEvent>()
-            .is_some_and(|e| e.key() == "Escape")
-        {
-            visible("lipid-hover", false);
+            options.into_iter().next()
         }
-    });
-    mount("lipid-rows", move || {
-        view! {
-            <For
-                each=move || {
-                    ui.plan
-                        .with(|p| p.membrane.as_ref().map(|m| m.rows.clone()).unwrap_or_default())
-                }
-                key=|r| r.id.clone()
-                children=move |r| row(ui, r)
-            />
-        }
-    });
-    on("add-membrane", "change", move |_| {
+    };
+    let proceed = move |_| {
+        ui.set_done(3, true);
+        ui.go(4);
+    };
+    let toggle = move |e: leptos::ev::Event| {
+        let checked = event_target_checked(&e);
         ui.plan.update(|p| {
-            if field("add-membrane").checked() {
+            if checked {
                 p.membrane = Some(ui.saved_membrane.get_value());
             } else if let Some(m) = p.membrane.take() {
                 ui.saved_membrane.set_value(m);
@@ -697,55 +259,434 @@ pub(super) fn setup(ui: Ui) {
         ui.set_done(3, false);
         ui.set_done(4, false);
         ui.set_done(5, false);
-    });
-    for id in ["per-leaflet", "per-membrane"] {
-        on(id, "change", move |_| {
-            update(ui, |m| m.per_leaflet = field("per-leaflet").checked())
-        });
+    };
+    view! {
+        <div class="stage-heading">
+            <h2 id="membrane-heading" tabindex="-1">
+                "4. Membrane"
+            </h2>
+            <button
+                class="secondary help-button"
+                type="button"
+                aria-label="Help for Membrane"
+                aria-haspopup="dialog"
+                aria-controls="stage-help"
+                data-help="Choose the membrane size and the mix of lipids on each side. To skip the membrane, unselect \"Add membrane\"."
+            >
+                "?"
+            </button>
+        </div>
+        <label class="protein-check">
+            <input
+                id="add-membrane"
+                type="checkbox"
+                prop:checked=has_membrane
+                disabled=move || ui.busy.get()
+                on:change=toggle
+            />
+            " Add membrane"
+        </label>
+        <div id="no-membrane-actions" class="actions" hidden=has_membrane>
+            <button
+                id="continue-no-membrane"
+                type="button"
+                disabled=move || !ui.components_ready() || !has_solute() || ui.busy.get()
+                on:click=proceed
+            >
+                "Continue"
+            </button>
+        </div>
+        <p id="no-membrane-note" class="small" hidden=has_membrane>
+            "The solute uses a rhombic dodecahedral box."
+        </p>
+        <div id="membrane-composition" class="composition-layout" hidden=move || !has_membrane()>
+            <div class="composition-editor">
+                <fieldset id="composition-controls" hidden=built disabled=move || ui.busy.get()>
+                    <legend class="sr-only">"Membrane composition"</legend>
+                    <p id="protein-area-note" class="small">
+                        "During the build, the protein area is subtracted from each leaflet before lipid counts are calculated."
+                    </p>
+                    <p
+                        id="composition-estimate"
+                        class="small"
+                        hidden=move || !composition.with(|c| c.estimated)
+                    >
+                        "Estimated counts and lipid areas from the entered cell size, without protein area."
+                    </p>
+                    <div class="composition-scroll">
+                        <table class="composition">
+                            <thead>
+                                <tr>
+                                    <th scope="col">"Lipid species"</th>
+                                    <th scope="col">
+                                        "Inner "
+                                        <span class="small column-help">
+                                            "Input → Normalized (lipids)"
+                                        </span>
+                                    </th>
+                                    <th scope="col">
+                                        "Outer "
+                                        <span class="small column-help">
+                                            "Input → Normalized (lipids)"
+                                        </span>
+                                    </th>
+                                    <th scope="col">
+                                        <span class="sr-only">"Remove"</span>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="lipid-rows">
+                                {
+                                    view! {
+                                        <For
+                                            each=move || {
+                                                ui.plan
+                                                    .with(|p| {
+                                                        p.membrane
+                                                            .as_ref()
+                                                            .map(|m| m.rows.clone())
+                                                            .unwrap_or_default()
+                                                    })
+                                            }
+                                            key=|r| r.id.clone()
+                                            children=move |r| row(ui, r, state, composition)
+                                        />
+                                    }
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <th scope="row">"Total"</th>
+                                    <td>
+                                        <div class="percentage-count">
+                                            <span id="inner-total" class="normalized-percentage">
+                                                {move || {
+                                                    composition
+                                                        .with(|c| {
+                                                            c.leaflets[0]
+                                                                .sum
+                                                                .map(percent)
+                                                                .unwrap_or_else(|| "—".into())
+                                                        })
+                                                }}
+                                            </span>
+                                            <span id="inner-total-count" class="lipid-count">
+                                                {move || {
+                                                    composition
+                                                        .with(|c| count_label(
+                                                            c
+                                                                .valid
+                                                                .then(|| c.leaflets[0].counts.iter().map(|v| v.1).sum()),
+                                                        ))
+                                                }}
+                                            </span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="percentage-count">
+                                            <span id="outer-total" class="normalized-percentage">
+                                                {move || {
+                                                    composition
+                                                        .with(|c| {
+                                                            c.leaflets[1]
+                                                                .sum
+                                                                .map(percent)
+                                                                .unwrap_or_else(|| "—".into())
+                                                        })
+                                                }}
+                                            </span>
+                                            <span id="outer-total-count" class="lipid-count">
+                                                {move || {
+                                                    composition
+                                                        .with(|c| count_label(
+                                                            c
+                                                                .valid
+                                                                .then(|| c.leaflets[1].counts.iter().map(|v| v.1).sum()),
+                                                        ))
+                                                }}
+                                            </span>
+                                        </div>
+                                    </td>
+                                    <td></td>
+                                </tr>
+                                <tr id="area-row">
+                                    <th scope="row">
+                                        <div class="area-tools">
+                                            <strong>"Area "<span class="small">"(nm²)"</span></strong>
+                                            <div
+                                                id="balance-controls"
+                                                hidden=move || !composition.with(|c| c.balance_needed)
+                                            >
+                                                <label for="balancing-lipid" class="sr-only">
+                                                    "Balancing lipid"
+                                                </label>
+                                                <select
+                                                    id="balancing-lipid"
+                                                    on:change=move |e| {
+                                                        balance_choice.set(event_target_value(&e));
+                                                        update(ui, |_| {});
+                                                    }
+                                                >
+                                                    {move || {
+                                                        balance_options()
+                                                            .into_iter()
+                                                            .map(|id| {
+                                                                let selected = balance_id() == Some(id.clone());
+                                                                let name = ui
+                                                                    .catalog
+                                                                    .with(|c| {
+                                                                        c.iter()
+                                                                            .find(|l| l.id == id)
+                                                                            .map(|l| l.name.clone())
+                                                                            .unwrap_or_else(|| id.clone())
+                                                                    });
+                                                                view! {
+                                                                    <option value=id selected=selected>
+                                                                        {name}
+                                                                    </option>
+                                                                }
+                                                            })
+                                                            .collect_view()
+                                                    }}
+                                                </select>
+                                                <button
+                                                    id="balance"
+                                                    class="secondary"
+                                                    type="button"
+                                                    disabled=move || {
+                                                        !composition.with(|c| c.valid)
+                                                            || ui
+                                                                .plan
+                                                                .with(|p| {
+                                                                    p.membrane
+                                                                        .as_ref()
+                                                                        .is_some_and(|m| m.balancing_lipid.is_some())
+                                                                })
+                                                    }
+                                                    on:click=move |_| {
+                                                        let id = balance_id();
+                                                        update(ui, |m| m.balancing_lipid = id);
+                                                    }
+                                                >
+                                                    "Balance"
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </th>
+                                    <td class="area-value">
+                                        <span id="inner-area">
+                                            {move || {
+                                                composition
+                                                    .with(|c| {
+                                                        if c.valid {
+                                                            format!("{:.3}", c.leaflets[0].area)
+                                                        } else {
+                                                            "—".into()
+                                                        }
+                                                    })
+                                            }}
+                                            {move || {
+                                                composition
+                                                    .with(|c| c.leaflets[0].excess)
+                                                    .map(|x| {
+                                                        view! {
+                                                            <span class="area-excess">
+                                                                {format!("(+{}%)", (x * 100.).round() / 100.)}
+                                                            </span>
+                                                        }
+                                                    })
+                                            }}
+                                        </span>
+                                    </td>
+                                    <td class="area-value">
+                                        <span id="outer-area">
+                                            {move || {
+                                                composition
+                                                    .with(|c| {
+                                                        if c.valid {
+                                                            format!("{:.3}", c.leaflets[1].area)
+                                                        } else {
+                                                            "—".into()
+                                                        }
+                                                    })
+                                            }}
+                                            {move || {
+                                                composition
+                                                    .with(|c| c.leaflets[1].excess)
+                                                    .map(|x| {
+                                                        view! {
+                                                            <span class="area-excess">
+                                                                {format!("(+{}%)", (x * 100.).round() / 100.)}
+                                                            </span>
+                                                        }
+                                                    })
+                                            }}
+                                        </span>
+                                    </td>
+                                    <td></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                    <button
+                        id="add-lipid"
+                        class="secondary"
+                        type="button"
+                        node_ref=state.button
+                        disabled=move || ui.catalog.with(Vec::is_empty) || ui.busy.get()
+                        on:click=move |_| state.open()
+                    >
+                        <span aria-hidden="true">"+"</span>
+                        " Add lipids"
+                    </button>
+                    <fieldset class="normalization">
+                        <legend class="sr-only">"Normalize percentages"</legend>
+                        <div class="normalization-options">
+                            <label>
+                                <input
+                                    id="per-leaflet"
+                                    type="radio"
+                                    name="normalization"
+                                    value="leaflet"
+                                    prop:checked=per_leaflet
+                                    on:change=move |_| update(ui, |m| m.per_leaflet = true)
+                                />
+                                " 100% per leaflet"
+                            </label>
+                            <label>
+                                <input
+                                    id="per-membrane"
+                                    type="radio"
+                                    name="normalization"
+                                    value="total"
+                                    prop:checked=move || !per_leaflet()
+                                    on:change=move |_| update(ui, |m| m.per_leaflet = false)
+                                />
+                                " 100% per membrane"
+                            </label>
+                        </div>
+                        <p id="combined-total" class="small" hidden=per_leaflet>
+                            {move || {
+                                if composition.with(|c| c.leaflets[0].sum.is_some()) {
+                                    "Normalized membrane total: 100%"
+                                } else {
+                                    "Normalized membrane total: —"
+                                }
+                            }}
+                        </p>
+                    </fieldset>
+                    <div class="cell-size">
+                        <label for="cell-size">"Hexagonal cell length (nm)"</label>
+                        <input
+                            id="cell-size"
+                            type="number"
+                            value="6"
+                            min="3"
+                            step="0.1"
+                            required
+                            on:input=move |e| update(
+                                ui,
+                                |m| {
+                                    m.size_nm = event_target::<HtmlInputElement>(&e)
+                                        .value_as_number();
+                                },
+                            )
+                            max=move || (!has_solute()).then_some("12")
+                        />
+                    </div>
+                    <div class="cell-size">
+                        <label for="xy-margin">"Minimum XY margin (nm)"</label>
+                        <input
+                            id="xy-margin"
+                            type="number"
+                            value="1"
+                            min="0"
+                            step="0.1"
+                            required
+                            on:input=move |e| update(
+                                ui,
+                                |m| {
+                                    m.margin_nm = event_target::<HtmlInputElement>(&e)
+                                        .value_as_number();
+                                },
+                            )
+                        />
+                    </div>
+                    <p id="resolved-cell" class="small">
+                        {move || {
+                            composition
+                                .with(|c| c.resolved)
+                                .map(|s| format!("Cell length after orientation: {s:.1} nm"))
+                        }}
+                    </p>
+                    <div class="actions">
+                        <button
+                            id="build"
+                            disabled=move || {
+                                !composition.with(|c| c.valid) || !ui.components_ready()
+                                    || ui.busy.get()
+                            }
+                            on:click=proceed
+                        >
+                            "Continue"
+                        </button>
+                    </div>
+                </fieldset>
+                <div id="computation" hidden>
+                    <p id="compute-status" role="status">
+                        "Building membrane…"
+                    </p>
+                    <progress id="compute-progress" aria-label="Building the membrane"></progress>
+                </div>
+                <div id="built-membrane" hidden=move || !built()>
+                    <div class="actions">
+                        <button
+                            id="edit-membrane"
+                            type="button"
+                            on:click=move |_| {
+                                ui.set_done(3, false);
+                                ui.set_done(5, false);
+                            }
+                        >
+                            "Edit..."
+                        </button>
+                    </div>
+                </div>
+                <p
+                    id="composition-error"
+                    class="error"
+                    role="alert"
+                    hidden=move || error().is_empty()
+                >
+                    {error}
+                </p>
+                <p id="connection" class="error" role="status" hidden></p>
+            </div>
+            <aside class="leaflet-charts" aria-label="Lipid counts by leaflet">
+                <LeafletChart side=0 composition />
+                <LeafletChart side=1 composition />
+            </aside>
+        </div>
+        <LipidPicker ui state />
+        <aside
+            id="lipid-hover"
+            class="hover-structure"
+            node_ref=state.popup
+            hidden=move || state.hover.with(Option::is_none)
+            style=move || {
+                let (x, y) = state.position.get();
+                format!("left:{x}px;top:{y}px")
+            }
+        >
+            <strong>{move || state.hover.with(|l| l.as_ref().map(|l| l.name.clone()))}</strong>
+            <img
+                src=move || state.hover.with(|l| l.as_ref().map(|l| l.image.clone()))
+                alt=move || {
+                    state
+                        .hover
+                        .with(|l| l.as_ref().map(|l| format!("{} chemical structure", l.name)))
+                }
+            />
+        </aside>
     }
-    on("cell-size", "input", move |_| {
-        update(ui, |m| m.size_nm = field("cell-size").value_as_number())
-    });
-    on("xy-margin", "input", move |_| {
-        update(ui, |m| m.margin_nm = field("xy-margin").value_as_number())
-    });
-    click("balance", move || {
-        update(ui, |m| {
-            m.balancing_lipid = Some(select("balancing-lipid").value())
-        })
-    });
-    on("balancing-lipid", "change", move |_| update(ui, |_| {}));
-    for id in ["build", "continue-no-membrane"] {
-        click(id, move || {
-            ui.set_done(3, true);
-            ui.go(4);
-        });
-    }
-    click("edit-membrane", move || {
-        ui.set_done(3, false);
-        ui.set_done(5, false);
-        visible("composition-controls", true);
-        visible("built-membrane", false);
-    });
-    Effect::new(move |_| {
-        let m = ui.plan.get().membrane;
-        visible("membrane-composition", m.is_some());
-        visible("no-membrane-note", m.is_none());
-        visible("no-membrane-actions", m.is_none());
-        enabled(
-            "continue-no-membrane",
-            ui.components_ready() && (ui.has_protein() || ui.has_ligands()),
-        );
-        if ui.has_protein() || ui.has_ligands() {
-            el("cell-size").remove_attribute("max").unwrap();
-        } else {
-            el("cell-size").set_attribute("max", "12").unwrap();
-        }
-        enabled("composition-controls", !ui.busy.get());
-        enabled("add-membrane", !ui.busy.get());
-        if let Some(m) = m {
-            let c = ui.catalog.get();
-            refresh(ui, &m, &c);
-        }
-    });
 }

@@ -94,6 +94,30 @@ async function protein(page) {
     await page.locator('#page-membrane:visible').waitFor();
     assert.equal(await page.locator('#protein-ready').isVisible(),true);
 }
+async function membrane(page) {
+    await page.locator('#page-membrane:visible').waitFor();
+    await page.locator('#add-lipid').click();
+    await page.locator('#lipid-search').fill('no-such-lipid');
+    assert.equal(await page.locator('#no-lipids').isVisible(), true);
+    await page.locator('#lipid-search').fill('POPC');
+    await page.locator('#picker-lipids [data-lipid=POPC]').click();
+    await page.locator('#POPC-inner').fill('1');
+    await page.locator('#POPC-outer').fill('1');
+    await page.locator('#build:enabled').waitFor();
+    assert.equal(await page.locator('#POPC-inner-count').textContent(), '(46)');
+    assert.equal(await page.locator('#outer-pie').getAttribute('data-total'), '46');
+    await page.locator('#per-membrane').check();
+    assert.equal(await page.locator('#POPC-inner-normalized').textContent(), '50%');
+    await page.locator('#cell-size').fill('3.01');
+    assert.equal(await page.locator('#build').isEnabled(),false);
+    await page.locator('#cell-size').fill('6');
+    await page.locator('#add-membrane').uncheck();
+    await page.locator('#no-membrane-actions:visible').waitFor();
+    await page.locator('#add-membrane').check();
+    assert.equal(await page.locator('#POPC-inner').inputValue(), '1');
+    await page.locator('#build').click();
+    await page.locator('#page-solvent:visible').waitFor();
+}
 (async()=>{
     const browser=await chromium.launch({executablePath:process.env.CHROMIUM_EXECUTABLE, args:['--enable-unsafe-swiftshader','--use-angle=swiftshader']});
     try {
@@ -104,7 +128,8 @@ async function protein(page) {
         await page.waitForFunction(()=>document.querySelector('#add-lipid:enabled'));
         await components(page);
         await protein(page);
+        await membrane(page);
         assert.deepEqual(errors,[]);
-        console.log('Components, Protein and Ligands forms passed');
+        console.log('Components, Protein, Ligands and Membrane forms passed');
     } finally {await browser.close();}
 })().catch(err=>{console.error(err);process.exitCode=1;});

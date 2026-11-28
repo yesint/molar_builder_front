@@ -86,22 +86,6 @@ pub fn click(id: &str, f: impl Fn() + 'static) {
 pub fn mount<V: IntoView + 'static>(id: &str, f: impl FnOnce() -> V + 'static) {
     leptos::mount::mount_to(el(id).unchecked_into(), f).forget();
 }
-pub fn options(id: &str, values: impl IntoIterator<Item = (String, String)>) {
-    let select = select(id);
-    let previous = select.value();
-    select.set_text_content(None);
-    for (value, label) in values {
-        let option = document().create_element("option").unwrap();
-        option.set_attribute("value", &value).unwrap();
-        option.set_text_content(Some(&label));
-        select.append_child(&option).unwrap();
-    }
-    select.set_value(&previous);
-    if select.selected_index() < 0 {
-        select.set_selected_index(0);
-    }
-}
-
 pub fn paged<T, V>(items: Vec<T>, render: impl Fn(T) -> V + Clone + Send + 'static) -> impl IntoView
 where
     T: Clone + Send + Sync + 'static,
