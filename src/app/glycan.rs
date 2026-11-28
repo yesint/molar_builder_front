@@ -43,12 +43,40 @@ fn strings(v: &Value) -> Vec<(String, String)> {
         })
         .collect()
 }
+fn attachment_label(residue: &Value, anomer: &str) -> String {
+    let atom = match residue["name"].as_str() {
+        Some("ASN") => "ND2",
+        Some("THR") => "OG1",
+        _ => "OG",
+    };
+    let symbol = if anomer == "a" { "α" } else { "β" };
+    format!(
+        "{} ({symbol}1 → {atom})",
+        components::residue_label(residue)
+    )
+}
+
+fn root_anomer<'a>(ptm: &'a Value, sequence: &str) -> &'a str {
+    if let Some(anomer) = ptm["root_anomer"].as_str().filter(|s| !s.is_empty()) {
+        return anomer;
+    }
+    let compact: String = sequence.split_whitespace().collect();
+    if let Some((_, linkage)) = compact.strip_suffix('-').and_then(|s| s.rsplit_once("(a"))
+        && !linkage.is_empty()
+        && linkage.bytes().all(|b| b.is_ascii_digit())
+    {
+        "a"
+    } else {
+        "b"
+    }
+}
+
 impl Editor {
-    fn residue(self) -> Value {
+    fn residue(self, site: u64) -> Value {
         let mut residue = self.ui.part.with_untracked(|p| {
             p.as_ref()
                 .and_then(|p| p.protein["residues"].as_array())
-                .and_then(|r| r.iter().find(|r| r["id"] == self.site.get_untracked()))
+                .and_then(|r| r.iter().find(|r| r["id"] == site))
                 .cloned()
                 .unwrap_or_default()
         });
@@ -65,13 +93,49 @@ impl Editor {
         }
         residue
     }
+    pub(super) fn row(self, site: u64, ptm: Value, remove: impl Fn() + 'static) -> impl IntoView {
+        let sequence: String = ptm["iupac"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("GlcNAc")
+            .split_whitespace()
+            .collect();
+        let label = attachment_label(&self.residue(site), root_anomer(&ptm, &sequence));
+        let remove_label = format!("Remove glycan from {label}");
+        view! {
+            <div class="protein-item glycan-item">
+                <div>
+                    <span>{label}</span>
+                    <code>{sequence}</code>
+                </div>
+                <div class="glycan-buttons">
+                    <button
+                        type="button"
+                        class="secondary compact"
+                        on:click=move |_| self.open(site)
+                    >
+                        "Edit…"
+                    </button>
+                    <button
+                        type="button"
+                        class="remove-lipid"
+                        aria-label=remove_label
+                        on:click=move |_| remove()
+                    >
+                        "×"
+                    </button>
+                </div>
+            </div>
+        }
+    }
+
     pub(super) fn open(self, site: u64) {
         self.site.set(site);
         self.selected.set(0);
         self.graph.set(Value::Null);
         self.history.set(vec![]);
         label("glycan-tree", "");
-        let r = self.residue();
+        let r = self.residue(self.site.get_untracked());
         label("glycan-attachment", &components::residue_label(&r));
         let previous = self
             .ui
@@ -87,13 +151,13 @@ impl Editor {
             .unwrap_or("GlcNAc");
         textarea().set_value(value);
         let _ = dialog("glycan-picker").show_modal();
-        self.request(json!({"iupac":value,"root_anomer":previous.as_ref().and_then(|p|p["root_anomer"].as_str()).unwrap_or("b")}),true,false);
+        self.request(json!({"iupac":value,"root_anomer":previous.as_ref().map_or("b", |ptm| root_anomer(ptm, value))}),true,false);
     }
     fn request(self, mut body: Value, format: bool, remember: bool) {
         self.generation.update_value(|n| *n += 1);
         let gen_id = self.generation.get_value();
         let old = self.graph.get_untracked();
-        body["site"] = self.residue()["name"].clone();
+        body["site"] = self.residue(self.site.get_untracked())["name"].clone();
         if body.get("iupac").is_some() && body.get("root_anomer").is_none() {
             body["root_anomer"] = json!(old["root_anomer"].as_str().unwrap_or("b"));
         }
@@ -164,23 +228,10 @@ impl Editor {
                 }
             }
         }
-        let r = self.residue();
+        let residue = self.residue(self.site.get_untracked());
         label(
             "glycan-attachment",
-            &format!(
-                "{} ({}1 → {})",
-                components::residue_label(&r),
-                if graph["root_anomer"] == "a" {
-                    "α"
-                } else {
-                    "β"
-                },
-                match r["name"].as_str() {
-                    Some("ASN") => "ND2",
-                    Some("THR") => "OG1",
-                    _ => "OG",
-                }
-            ),
+            &attachment_label(&residue, graph["root_anomer"].as_str().unwrap_or("b")),
         );
         options("glycan-node-sugar", strings(&graph["sugars"]));
         let first = select("glycan-add-sugar").value().is_empty();

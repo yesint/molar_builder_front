@@ -325,7 +325,11 @@ pub(super) fn setup(ui: Ui) {
                     ));
                 }
                 for m in p.protein.ptms {
-                    let name = m["type"].as_str().unwrap_or("").replace('_', " ");
+                    let name = if m["iupac"].as_str().is_some_and(|s| !s.is_empty()) {
+                        "glycan".to_owned()
+                    } else {
+                        m["type"].as_str().unwrap_or("").replace('_', " ")
+                    };
                     if !details.contains(&name) {
                         details.push(name);
                     }
@@ -339,9 +343,19 @@ pub(super) fn setup(ui: Ui) {
                 && let Some(part) = ui.part.get()
                 && !part.ligands.is_empty()
             {
-                let names = ligands::descriptions(ui, &part)
+                let mut counts = indexmap::IndexMap::new();
+                for (name, _, _) in ligands::descriptions(ui, &part) {
+                    *counts.entry(name).or_insert(0usize) += 1;
+                }
+                let names = counts
                     .into_iter()
-                    .map(|v| v.0)
+                    .map(|(name, count)| {
+                        if count == 1 {
+                            name
+                        } else {
+                            format!("{name} ×{count}")
+                        }
+                    })
                     .collect::<Vec<_>>();
                 steps.push(with_details("Parameterize ligands", &names));
             }

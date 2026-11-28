@@ -349,6 +349,20 @@ pub(super) fn setup(ui: Ui) {
                         .enumerate()
                         .map(|(i, item)| {
                             let site = item["residue"].as_u64().unwrap();
+                            let remove = move || {
+                                ui.plan
+                                    .update(|p| {
+                                        if kind == "ptms" {
+                                            p.protein.ptms.remove(i);
+                                        } else {
+                                            p.protein.mutations.remove(i);
+                                        }
+                                    });
+                                changed(ui);
+                            };
+                            if item["type"] == "glycosylation" {
+                                return editor.row(site, item, remove).into_any();
+                            }
                             let name = rows
                                 .iter()
                                 .find(|r| r["id"] == site)
@@ -361,46 +375,22 @@ pub(super) fn setup(ui: Ui) {
                             } else {
                                 format!(
                                     "{name}, {}",
-                                    item["iupac"]
-                                        .as_str()
-                                        .or(item["type"].as_str())
-                                        .unwrap_or("")
-                                        .replace('_', " "),
+                                    item["type"].as_str().unwrap_or("").replace('_', " "),
                                 )
                             };
                             view! {
                                 <div class="protein-item">
                                     {label}
-                                    {(item["type"] == "glycosylation")
-                                        .then(|| {
-                                            view! {
-                                                <button
-                                                    class="secondary compact"
-                                                    on:click=move |_| editor.open(site)
-                                                >
-                                                    "Edit…"
-                                                </button>
-                                            }
-                                        })}
                                     <button
                                         class="remove-lipid"
                                         aria-label="Remove"
-                                        on:click=move |_| {
-                                            ui.plan
-                                                .update(|p| {
-                                                    if kind == "ptms" {
-                                                        p.protein.ptms.remove(i);
-                                                    } else {
-                                                        p.protein.mutations.remove(i);
-                                                    }
-                                                });
-                                            changed(ui);
-                                        }
+                                        on:click=move |_| remove()
                                     >
                                         "×"
                                     </button>
                                 </div>
                             }
+                                .into_any()
                         })
                         .collect_view()}
                 }

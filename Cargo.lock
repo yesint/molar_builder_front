@@ -508,6 +508,7 @@ dependencies = [
  "futures-util",
  "gloo-net",
  "gloo-timers",
+ "indexmap",
  "js-sys",
  "leptos",
  "molar",
