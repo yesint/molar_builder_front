@@ -25,6 +25,35 @@ pub fn flag(element: &Element, name: &str, enabled: bool) {
 pub fn visible(id: &str, show: bool) {
     flag(&el(id), "hidden", !show);
 }
+/// Keep the graphics surface sized while the workflow hides its current panel.
+pub fn mount_viewer_canvas(canvas: web_sys::HtmlCanvasElement) {
+    let position = move || {
+        let host = document()
+            .query_selector("section:not([hidden]) .structure-viewer:not([hidden])")
+            .unwrap()
+            .unwrap_or_else(|| el("viewer-standby"));
+        if canvas.parent_element().as_ref() != Some(&host) {
+            host.append_child(&canvas).unwrap();
+        }
+    };
+    position();
+    let callback = Closure::wrap(Box::new(position) as Box<dyn FnMut()>);
+    let observer = web_sys::MutationObserver::new(callback.as_ref().unchecked_ref()).unwrap();
+    let options = web_sys::MutationObserverInit::new();
+    options.set_attribute_filter(&js_sys::Array::of1(&"hidden".into()));
+    for id in [
+        "load-viewer",
+        "protein-viewer",
+        "ligand-viewer",
+        "assembly-viewer",
+    ] {
+        let host = el(id);
+        observer.observe_with_options(&host, &options).unwrap();
+        let section = host.closest("section").unwrap().unwrap();
+        observer.observe_with_options(&section, &options).unwrap();
+    }
+    callback.forget();
+}
 pub fn enabled(id: &str, enable: bool) {
     flag(&el(id), "disabled", !enable);
 }

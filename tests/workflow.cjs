@@ -64,14 +64,36 @@ async function membrane(page, base) {
     assert.equal(await page.locator('#assemble-system').isEnabled(), true);
 }
 
-async function ligand(page) {
+async function ligand(page, webgpu) {
     await visit(page, origin);
     await page.locator('#ligand-files').setInputFiles({
         name: 'methane.sdf', mimeType: 'chemical/x-mdl-sdfile', buffer: Buffer.from(methane),
     });
     await page.locator('#load-viewer[data-state=rendered]:visible').waitFor();
-    await page.getByLabel('mol 1', {exact: true}).uncheck();
-    await page.getByLabel('mol 1', {exact: true}).check();
+    const canvas = page.locator('#load-viewer canvas');
+    const all = page.locator('#load-ligands').getByLabel('All', {exact: true});
+    const frame = webgpu ? () => page.evaluate(() => window.readViewerFrame()) : () => canvas.screenshot();
+    const shown = await frame();
+    const requests = [];
+    const track = r => requests.push(new URL(r.url()).pathname);
+    page.on('request', track);
+    await all.uncheck();
+    await page.waitForFunction(() => document.querySelector('#load-viewer').dataset.state === 'rendered');
+    const hidden = await frame();
+    assert.notDeepEqual(shown, hidden, 'Deselecting ligands must change the rendered image');
+    await all.check();
+    await page.waitForFunction(() => document.querySelector('#load-viewer').dataset.state === 'rendered');
+    assert.deepEqual(await frame(), shown, 'Showing ligands must restore the original view');
+    page.off('request', track);
+    assert.deepEqual(requests, [], 'Toggling cached ligands must not fetch any assets');
+    await page.locator('[data-page=membrane]').click();
+    await page.waitForFunction(() => {
+        const c = document.querySelector('#viewer-standby canvas');
+        return c?.width > 0 && c.height > 0
+            && c.getBoundingClientRect().width === 1;
+    });
+    await page.locator('[data-page=load]').click();
+    await page.waitForFunction(() => document.querySelector('#load-viewer canvas')?.width > 1);
     await page.locator('#partition-system').click();
     await page.locator('#ligand-viewer[data-state=rendered]:visible').waitFor();
     await page.locator('#edit-ligand').click();
@@ -91,14 +113,21 @@ async function ligand(page) {
 (async () => {
     const health = await fetch(new URL('/api/health', origin)).then(r => r.json());
     assert.equal(health.mode, 'local', 'This test submits builds and requires free local mode.');
+    const webgpu = process.env.WEBGPU === '1';
     const browser = await chromium.launch({
         executablePath: process.env.CHROMIUM_EXECUTABLE,
-        args: ['--disable-webgpu', '--disable-blink-features=WebGPU', '--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--disable-gpu-watchdog'],
+        args: webgpu
+            ? ['--enable-unsafe-webgpu', '--enable-unsafe-swiftshader', '--use-angle=vulkan', '--enable-features=Vulkan', '--disable-vulkan-surface', '--disable-gpu-watchdog']
+            : ['--disable-webgpu', '--disable-blink-features=WebGPU', '--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--disable-gpu-watchdog'],
     });
     try {
         const page = await browser.newPage({viewport: {width: 1440, height: 940}});
         page.setDefaultTimeout(60000);
         const errors = [];
+        if (webgpu) {
+            await page.exposeFunction('reportGpuError', error => errors.push(error));
+            await page.addInitScript(require('./webgpu.cjs'));
+        }
         page.on('pageerror', error => errors.push(error.message));
         await membrane(page, origin);
         if (process.env.REFERENCE_URL) {
@@ -108,7 +137,7 @@ async function ligand(page) {
             await original.close();
         }
         await saveResult(page);
-        await ligand(page);
+        await ligand(page, webgpu);
         assert.deepEqual(errors, []);
         console.log('Passed membrane and ligand builds, viewer controls, and archive downloads.');
     } finally {

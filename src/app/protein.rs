@@ -87,11 +87,11 @@ pub(super) fn details(ui: Ui, built: bool) -> Vec<Layer> {
 }
 pub(super) fn preview(ui: Ui) {
     let Some(p) = ui.part.get() else {
-        ui.viewer.send(Action::Preview(vec![]));
+        ui.viewer.send(Action::Preview("protein-viewer", vec![]));
         return;
     };
     if p.protein.is_null() {
-        ui.viewer.send(Action::Preview(vec![]));
+        ui.viewer.send(Action::Preview("protein-viewer", vec![]));
         return;
     }
     let completed = ui.result.get().filter(|_| ui.confirmed.get()[5]);
@@ -141,7 +141,7 @@ pub(super) fn preview(ui: Ui) {
             )],
         });
     }
-    ui.viewer.send(Action::Preview(models));
+    ui.viewer.send(Action::Preview("protein-viewer", models));
 }
 fn changed(ui: Ui) {
     ui.set_done(1, false);

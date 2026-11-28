@@ -197,7 +197,8 @@ pub fn Builder() -> impl IntoView {
         ui.msg,
         ui.editing,
     ));
-    setup(ui, canvas);
+    mount_viewer_canvas(canvas);
+    setup(ui);
     spawn_local(async move {
         match api::get::<Value>("/api/health").await {
             Ok(v) => ui.health.set(v),
@@ -215,7 +216,7 @@ pub fn Builder() -> impl IntoView {
         }
     });
 }
-fn setup(ui: Ui, canvas: web_sys::HtmlCanvasElement) {
+fn setup(ui: Ui) {
     components::setup(ui);
     protein::setup(ui);
     ligands::setup(ui);
@@ -293,16 +294,6 @@ fn setup(ui: Ui, canvas: web_sys::HtmlCanvasElement) {
     });
     Effect::new(move |_| {
         let stage = ui.stage.get();
-        let dest = match stage {
-            0 => "load-viewer",
-            1 => "protein-viewer",
-            2 => "ligand-viewer",
-            5 => "assembly-viewer",
-            _ => return,
-        };
-        if canvas.parent_element().is_none_or(|p| p.id() != dest) {
-            el(dest).append_child(&canvas).unwrap();
-        }
         match stage {
             0 => components::preview(ui),
             1 => protein::preview(ui),

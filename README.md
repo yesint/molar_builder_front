@@ -36,3 +36,5 @@ cargo clippy --locked --all-targets --target wasm32-unknown-unknown -- -D warnin
 The molecular viewer is distributed under the Artistic License 2.0. [MolAR viewer](https://github.com/yesint/molar_vis)
 
 The browser regression test submits a solvated POPC membrane and a dry methane molecule to a local Rust server. It checks leaflet counts, stage confirmation, ligand editing, final rendering, and ZIP downloads. With Playwright and Chromium installed, run `node tests/workflow.cjs`. Set `BUILDER_URL` to use a local server on another port. Set `REFERENCE_URL` to the running HTML/JS version to compare the membrane submission screen in both applications.
+
+Set `WEBGPU=1` to run the browser checks with WebGPU. The test reads the rendered frame before and after a ligand visibility change, checks that selecting the ligands restores the image, and records GPU validation errors.

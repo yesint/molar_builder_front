@@ -3,8 +3,8 @@ use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures_util::StreamExt;
 use leptos::prelude::*;
 use molar::prelude::*;
-use molar_vis_web::{MoleculeEvent, MoleculeHandle, RepresentationHandle, ViewerHandle};
-use std::{io::Cursor, rc::Rc};
+use molar_vis_web::{MoleculeEvent, MoleculeHandle, SystemSource, ViewerHandle};
+use std::{collections::BTreeMap, io::Cursor, rc::Rc};
 use web_sys::HtmlCanvasElement;
 #[derive(Clone)]
 pub struct Scene {
@@ -50,14 +50,30 @@ pub struct Preview {
     pub layers: Vec<Layer>,
 }
 struct LoadedPreview {
-    molecule: MoleculeHandle,
-    layers: Vec<(Layer, RepresentationHandle)>,
+    molecule: u64,
+    layers: Vec<PreviewLayer>,
+}
+struct PreviewLayer {
+    settings: Layer,
+    rep: u64,
+    visible: bool,
 }
 pub enum Action {
     Show(Scene),
-    Preview(Vec<Preview>),
+    Preview(&'static str, Vec<Preview>),
     Edit(bool),
     Save(futures_channel::oneshot::Sender<Result<(), String>>),
+}
+impl Action {
+    fn panel(&self) -> Option<web_sys::Element> {
+        let id = match self {
+            Action::Preview(id, _) => *id,
+            Action::Show(scene) if scene.ligand.is_some() => "ligand-viewer",
+            Action::Show(_) => "assembly-viewer",
+            Action::Edit(_) | Action::Save(_) => return None,
+        };
+        document().get_element_by_id(id)
+    }
 }
 #[derive(Clone, Copy)]
 pub struct Viewer {
@@ -110,7 +126,7 @@ struct Controller {
     canvas: HtmlCanvasElement,
     host: Option<ViewerHandle>,
     current: Option<Current>,
-    previews: std::collections::BTreeMap<String, LoadedPreview>,
+    previews: BTreeMap<String, LoadedPreview>,
     plan: RwSignal<Plan>,
     editing: RwSignal<bool>,
 }
@@ -123,7 +139,7 @@ impl Controller {
                 let _ = reply.send(result.clone());
                 result?;
             }
-            Action::Preview(models) => self.preview(models).await?,
+            Action::Preview(_, models) => self.preview(models).await?,
             Action::Edit(enabled) => {
                 if let Some(current) = &self.current
                     && current.ligand.is_some()
@@ -163,90 +179,122 @@ impl Controller {
         }
         self.start().await?;
         let host = self.host.as_ref().unwrap();
-        if self.current.is_some()
+        let replace = self.current.is_some()
             || self
                 .previews
                 .keys()
-                .any(|key| !models.iter().any(|m| m.path == *key))
-        {
+                .any(|key| !models.iter().any(|m| &m.path == key));
+        if replace {
             self.save().await?;
-            host.clear().await?;
-            self.current = None;
-            self.previews.clear();
-            self.editing.set(false);
         }
         let oriented = models.iter().any(|m| m.name == "membrane_planes.cif");
-        let mut added = false;
-        for model in models {
-            let layers: Vec<_> = model
+        let mut updates = Vec::with_capacity(models.len());
+        for mut model in models {
+            model
                 .layers
-                .into_iter()
-                .filter(|l| !l.selection.is_empty() && l.selection != "not all")
-                .collect();
-            if !self.previews.contains_key(&model.path) {
-                if layers.is_empty() {
+                .retain(|layer| !layer.selection.is_empty() && layer.selection != "not all");
+            let loaded = !replace && self.previews.contains_key(&model.path);
+            let system = if loaded {
+                None
+            } else {
+                if model.layers.is_empty() {
                     continue;
                 }
-                let bytes = match model.bytes {
-                    Some(b) => b.as_ref().clone(),
+                let bytes = match model.bytes.take() {
+                    Some(bytes) => bytes.as_ref().clone(),
                     None => api::bytes(&model.path, None).await?,
                 };
-                let system = read_system(&model.name, bytes)?;
-                let molecule = host.add_system(model.name, Rc::new(system)).await?;
-                for rep in molecule.representations().await? {
-                    rep.remove().await?;
-                }
-                self.previews.insert(
-                    model.path.clone(),
-                    LoadedPreview {
-                        molecule,
-                        layers: vec![],
-                    },
-                );
-                added = true;
-            }
-            let entry = self.previews.get_mut(&model.path).unwrap();
-            for (old, rep) in &entry.layers {
-                if !layers.iter().any(|new| new.role == old.role) {
-                    rep.set_visible(false).await?;
-                }
-            }
-            for layer in layers {
-                if let Some((old, rep)) = entry
-                    .layers
-                    .iter_mut()
-                    .find(|(old, _)| old.role == layer.role)
-                {
-                    if old.selection != layer.selection {
-                        rep.select_text(layer.selection.clone()).await?;
-                        *old = layer;
-                    }
-                    rep.set_visible(true).await?;
-                } else {
-                    let rep = entry
-                        .molecule
-                        .add_rep(
-                            layer.selection.clone(),
-                            layer.style.into(),
-                            layer.color.into(),
-                        )
-                        .await?;
-                    entry.layers.push((layer, rep));
-                }
-            }
+                Some(read_system(&model.name, bytes)?)
+            };
+            updates.push((model, system));
         }
-        if added {
-            host.with_app(move |app| {
+
+        let previews = &mut self.previews;
+        host.update_now(|app| {
+            if replace {
+                app.clear();
+                previews.clear();
+                self.current = None;
+                self.editing.set(false);
+            }
+            let mut added = false;
+            for (model, system) in updates {
+                if let Some(system) = system {
+                    let source = Box::new(SystemSource(Rc::new(system)));
+                    let index = app.add_shared_molecule(source, model.name)?;
+                    let molecule = app.molecule_ids()[index];
+                    for rep in app.rep_ids(molecule)? {
+                        app.remove_rep_by_id(molecule, rep)?;
+                    }
+                    previews.insert(
+                        model.path.clone(),
+                        LoadedPreview {
+                            molecule,
+                            layers: vec![],
+                        },
+                    );
+                    added = true;
+                }
+                let entry = previews.get_mut(&model.path).expect("preview was loaded");
+                for old in &mut entry.layers {
+                    if old.visible
+                        && !model
+                            .layers
+                            .iter()
+                            .any(|layer| layer.role == old.settings.role)
+                    {
+                        app.set_rep_visible(entry.molecule, old.rep, false)?;
+                        old.visible = false;
+                    }
+                }
+                for layer in model.layers {
+                    if let Some(old) = entry
+                        .layers
+                        .iter_mut()
+                        .find(|old| old.settings.role == layer.role)
+                    {
+                        if old.settings != layer {
+                            let (mi, ri) = app.resolve_rep(entry.molecule, old.rep)?;
+                            if old.settings.selection != layer.selection {
+                                app.set_rep_selection_text(mi, ri, &layer.selection)?;
+                            }
+                            if old.settings.style != layer.style {
+                                app.set_rep_style(mi, ri, layer.style)?;
+                            }
+                            if old.settings.color != layer.color {
+                                app.set_rep_color(mi, ri, layer.color)?;
+                            }
+                            old.settings = layer;
+                        }
+                        if !old.visible {
+                            app.set_rep_visible(entry.molecule, old.rep, true)?;
+                            old.visible = true;
+                        }
+                    } else {
+                        let rep = app.add_styled_rep(
+                            entry.molecule,
+                            &layer.selection,
+                            layer.style,
+                            layer.color,
+                        )?;
+                        entry.layers.push(PreviewLayer {
+                            settings: layer,
+                            rep,
+                            visible: true,
+                        });
+                    }
+                }
+            }
+            if added {
                 app.reset_view();
                 if oriented {
                     app.rotate_view(0., 70.);
                 }
-                Ok(())
-            })
-            .await?;
-        }
-        Ok(())
+            }
+            Ok(())
+        })
     }
+
     async fn show(&mut self, scene: Scene) -> Result<(), String> {
         self.save().await?;
         let saved = scene
@@ -393,15 +441,35 @@ pub async fn serve(
         plan,
         editing,
     };
-    while let Some(action) = actions.next().await {
-        let rendering = matches!(&action, Action::Show(_) | Action::Preview(_));
-        let parent = controller.canvas.parent_element();
+    let mut pending = None;
+    loop {
+        let mut action = match pending.take() {
+            Some(action) => action,
+            None => match actions.next().await {
+                Some(action) => action,
+                None => break,
+            },
+        };
+        // Each preview describes the entire scene. Preserve save, edit and show ordering.
+        while matches!(action, Action::Preview(..)) {
+            match actions.try_recv() {
+                Ok(next @ Action::Preview(..)) => action = next,
+                other => {
+                    pending = other.ok();
+                    break;
+                }
+            }
+        }
+        let panel = action.panel();
+        if let Some(panel) = &panel {
+            let _ = panel.set_attribute("data-state", "updating");
+        }
         if let Err(error) = controller.apply(action).await {
-            if rendering && let Some(p) = parent {
+            if let Some(p) = panel {
                 let _ = p.set_attribute("data-state", "unavailable");
             }
             message.set(error);
-        } else if rendering && let Some(p) = parent {
+        } else if let Some(p) = panel {
             let _ = p.set_attribute("data-state", "rendered");
         }
     }

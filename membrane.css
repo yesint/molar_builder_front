@@ -79,8 +79,9 @@ fieldset { padding: 0; margin: 0; border: 0; min-width: 0; }
   #glycan-iupac { flex: none; height: 9rem; }
   #glycan-tree { flex: none; height: clamp(10rem, 32dvh, 20rem); }
 }
+#viewer-standby { position: fixed; left: -2px; top: 0; width: 1px; height: 1px; overflow: hidden; visibility: hidden; }
 .structure-viewer { height: 610px; min-width: 0; border: 1px solid #d5dcd9; background: white; }
-.structure-viewer canvas { border: 0; width: 100%; height: 100%; display: block; }
+.structure-viewer canvas, #viewer-standby canvas { min-width: 1px; min-height: 1px; border: 0; width: 100%; height: 100%; display: block; }
 #ptm-picker, #ss-picker { width: min(440px, calc(100% - 32px)); }
 #ptm-picker select, #ss-picker select { width: 100%; font: inherit; padding: 8px; margin-bottom: 16px; }
 #page-ligands { container: ligands / inline-size; }

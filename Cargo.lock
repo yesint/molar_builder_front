@@ -2612,7 +2612,7 @@ dependencies = [
 [[package]]
 name = "molar_vis_core"
 version = "0.3.0"
-source = "git+https://github.com/yesint/molar_vis?rev=4d549f1506edc4471861d2694262869468a93f82#4d549f1506edc4471861d2694262869468a93f82"
+source = "git+https://github.com/yesint/molar_vis?rev=f07b16d6aec7729f3dfeda831caf291fe2455b72#f07b16d6aec7729f3dfeda831caf291fe2455b72"
 dependencies = [
  "bytemuck",
  "console_error_panic_hook",
@@ -2645,7 +2645,7 @@ dependencies = [
 [[package]]
 name = "molar_vis_web"
 version = "0.3.0"
-source = "git+https://github.com/yesint/molar_vis?rev=4d549f1506edc4471861d2694262869468a93f82#4d549f1506edc4471861d2694262869468a93f82"
+source = "git+https://github.com/yesint/molar_vis?rev=f07b16d6aec7729f3dfeda831caf291fe2455b72#f07b16d6aec7729f3dfeda831caf291fe2455b72"
 dependencies = [
  "futures-channel",
  "molar",

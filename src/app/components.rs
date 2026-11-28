@@ -189,42 +189,58 @@ impl Model {
     }
 }
 pub(super) fn preview(ui: Ui) {
-    let mut primary = true;
-    let mut models = vec![];
-    for source in ui.files.get() {
-        for m in source.models {
-            let u = &m.upload;
-            let first = primary && u.format != "sdf";
-            if first {
-                primary = false;
-            }
-            let file = if u.format == "sdf" {
-                "source.sdf"
-            } else {
-                "structure.cif"
-            };
-            let protein_style = if u.report["coarse_grained"] == true {
-                "vdw"
-            } else {
-                "cartoon"
-            };
-            let ligand_style = if first && !items(&u.report, "chains").is_empty() {
-                "licorice"
-            } else {
-                "ballstick"
-            };
-            models.push(Preview {
-                bytes: None,
-                path: format!("/api/file/upload/{}/{file}", u.id),
-                name: file.into(),
-                layers: vec![
-                    Layer::new("protein", m.expression(0), protein_style, "chain"),
-                    Layer::new("ligands", m.expression(1), ligand_style, "element"),
-                ],
-            });
-        }
-    }
-    ui.viewer.send(Action::Preview(models));
+    let models = ui.choices.with(|choices| {
+        ui.files.with_untracked(|sources| {
+            let mut primary = true;
+            let models = sources.iter().flat_map(|source| &source.models);
+            models
+                .zip(choices)
+                .map(|(model, selection)| {
+                    let upload = &model.upload;
+                    let first_structure = primary && upload.format != "sdf";
+                    if first_structure {
+                        primary = false;
+                    }
+                    let file = if upload.format == "sdf" {
+                        "source.sdf"
+                    } else {
+                        "structure.cif"
+                    };
+                    let protein_style = if upload.report["coarse_grained"] == true {
+                        "vdw"
+                    } else {
+                        "cartoon"
+                    };
+                    let ligand_style =
+                        if first_structure && !items(&upload.report, "chains").is_empty() {
+                            "licorice"
+                        } else {
+                            "ballstick"
+                        };
+                    Preview {
+                        bytes: None,
+                        path: format!("/api/file/upload/{}/{file}", upload.id),
+                        name: file.into(),
+                        layers: vec![
+                            Layer::new(
+                                "protein",
+                                selection.protein_selection.clone(),
+                                protein_style,
+                                "chain",
+                            ),
+                            Layer::new(
+                                "ligands",
+                                selection.ligand_selection.clone(),
+                                ligand_style,
+                                "element",
+                            ),
+                        ],
+                    }
+                })
+                .collect()
+        })
+    });
+    ui.viewer.send(Action::Preview("load-viewer", models));
 }
 fn checkbox(
     ui: Ui,
