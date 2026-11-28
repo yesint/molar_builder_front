@@ -118,6 +118,27 @@ async function membrane(page) {
     await page.locator('#build').click();
     await page.locator('#page-solvent:visible').waitFor();
 }
+async function solvent(page) {
+    const proceed = page.locator('#continue-solvent');
+    const concentration = page.locator('#salt-concentration');
+    await concentration.fill('-0.1');
+    await proceed.click();
+    assert.equal(await page.locator('#page-solvent').isVisible(),true);
+    await concentration.fill('0.23');
+    await page.locator('#assembly-salt').selectOption('KCl');
+    await page.locator('#neutralize-system').uncheck();
+    await page.locator('#add-solvent').uncheck();
+    await page.locator('#solvent-parameters').waitFor({state:'hidden'});
+    await page.locator('#add-solvent').check();
+    assert.equal(await concentration.inputValue(),'0.23');
+    await proceed.click();
+    await page.locator('#page-submit:visible').waitFor();
+    assert.match(await page.locator('#submit-summary').innerText(),/0.23 mol.L KCl/);
+    await page.locator('[data-page=solvent]').click();
+    await page.locator('#add-solvent').uncheck();
+    await proceed.click();
+    assert.doesNotMatch(await page.locator('#submit-summary').innerText(),/Add solvent and ions/);
+}
 (async()=>{
     const browser=await chromium.launch({executablePath:process.env.CHROMIUM_EXECUTABLE, args:['--enable-unsafe-swiftshader','--use-angle=swiftshader']});
     try {
@@ -129,7 +150,8 @@ async function membrane(page) {
         await components(page);
         await protein(page);
         await membrane(page);
+        await solvent(page);
         assert.deepEqual(errors,[]);
-        console.log('Components, Protein, Ligands and Membrane forms passed');
+        console.log('Components, Protein, Ligands Membrane and Solvent forms passed');
     } finally {await browser.close();}
 })().catch(err=>{console.error(err);process.exitCode=1;});

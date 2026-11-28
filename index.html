@@ -42,25 +42,7 @@
         <section id="page-proteins" aria-labelledby="proteins-heading" hidden></section>
         <section id="page-membrane" aria-labelledby="membrane-heading" hidden></section>
         <section id="page-ligands" aria-labelledby="ligands-heading" hidden></section>
-        <section id="page-solvent" aria-labelledby="solvent-heading" hidden>
-          <div class="stage-heading">
-            <h2 id="solvent-heading" tabindex="-1">5. Solvent</h2>
-            <button class="secondary help-button" type="button" aria-label="Help for Solvent" aria-haspopup="dialog" aria-controls="stage-help"
-              data-help='Choose how much water to add and what type and concentration of salt to use. Select "Neutralize" to balance the total charge. To skip adding water and salt, unselect "Add solvent".'>?</button>
-          </div>
-          <fieldset id="assembly-options">
-            <label class="protein-check"><input id="add-solvent" type="checkbox" checked> Add solvent</label>
-            <fieldset id="solvent-parameters" class="assembly-options">
-              <label id="waters-per-lipid-label" for="waters-per-lipid">Water molecules per lipid</label><input id="waters-per-lipid" type="number" min="1" step="1" value="50" required>
-              <label for="water-clearance">Water clearance beyond protein (nm)</label><input id="water-clearance" type="number" min="0" step="0.1" value="1" required>
-              <label for="assembly-salt">Salt</label><select id="assembly-salt"><option>NaCl</option><option>KCl</option><option>CaCl2</option><option>MgCl2</option></select>
-              <label for="salt-concentration">Concentration (mol/L)</label><input id="salt-concentration" type="number" min="0" step="0.01" value="0.15" required>
-              <label class="protein-check"><input id="neutralize-system" type="checkbox" checked> Neutralize</label>
-            </fieldset>
-          </fieldset>
-          <p id="assembly-box" class="small"></p>
-          <div class="actions"><button id="continue-solvent" type="button">Continue</button></div>
-        </section>
+        <section id="page-solvent" aria-labelledby="solvent-heading" hidden></section>
         <section id="page-submit" aria-labelledby="submit-heading" hidden>
           <div class="stage-heading">
             <h2 id="submit-heading" tabindex="-1">6. Submit</h2>

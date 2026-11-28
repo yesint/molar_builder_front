@@ -1,21 +1,13 @@
 use leptos::prelude::*;
 use wasm_bindgen::{JsCast, closure::Closure};
-use web_sys::{
-    Element, Event, EventTarget, HtmlDialogElement, HtmlElement, HtmlInputElement,
-    HtmlSelectElement,
-};
+use web_sys::{Element, Event, EventTarget, HtmlDialogElement, HtmlElement};
 
 pub fn el(id: &str) -> Element {
     document()
         .get_element_by_id(id)
         .unwrap_or_else(|| panic!("Missing page element {id}"))
 }
-pub fn field(id: &str) -> HtmlInputElement {
-    el(id).unchecked_into()
-}
-pub fn select(id: &str) -> HtmlSelectElement {
-    el(id).unchecked_into()
-}
+
 pub fn dialog(id: &str) -> HtmlDialogElement {
     el(id).unchecked_into()
 }

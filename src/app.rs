@@ -233,7 +233,10 @@ fn setup(ui: Ui) {
         "page-membrane",
         move || view! { <membrane::MembranePage ui /> },
     );
-    solvent::setup(ui);
+    mount(
+        "page-solvent",
+        move || view! { <solvent::SolventPage ui /> },
+    );
     checkout::setup(ui);
     click("open-about", || {
         let _ = dialog("about-builder").show_modal();
@@ -319,7 +322,7 @@ fn setup(ui: Ui) {
         }
     });
     Effect::new(move |_| {
-        if ui.stage.get() < 4 {
+        if ui.stage.get() < 5 {
             return;
         }
         let id = [
