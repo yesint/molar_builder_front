@@ -374,35 +374,62 @@ fn summary(ui: Ui) -> impl IntoView {
             .collect_view()
     }
 }
-fn build_log(ui: Ui) -> impl IntoView {
-    move || {
-        let entries = ui.logs.get();
-        let finished = ui.confirmed.get()[Page::Submit as usize];
-        let error = !ui.error(Page::Submit).get().is_empty() && !ui.busy.get();
-        entries
-            .iter()
-            .enumerate()
-            .map(|(i, (started, name))| {
-                let end = entries.get(i + 1).map(|r| r.0);
-                let (state, marker) = if end.is_some() || finished {
-                    ("done", "✓")
-                } else if error {
-                    ("failed", "×")
-                } else {
-                    ("running", "…")
-                };
-                let duration = end.map(|next| elapsed(next - started)).unwrap_or_default();
-                view! {
-                    <li data-state=state>
-                        <div class="log-line">
-                            <span class="stage-mark">{marker}</span>
-                            <span>{name.clone()}</span>
-                            <time>{duration}</time>
-                        </div>
-                    </li>
+#[component]
+fn BuildLog(ui: Ui) -> impl IntoView {
+    let log = NodeRef::<leptos::html::Ol>::new();
+    // The server returns the full log, including on polls with no new entries.
+    let entries = Memo::new(move |_| ui.logs.get());
+    Effect::new(move |_| {
+        if ui.stage.get() == Page::Submit && !entries.with(Vec::is_empty) {
+            request_animation_frame(move || {
+                if let Some(log) = log.get_untracked() {
+                    log.set_scroll_top(log.scroll_height());
                 }
-            })
-            .collect_view()
+            });
+        }
+    });
+    let rows = move || {
+        entries.with(|entries| {
+            let finished = ui.confirmed.get()[Page::Submit as usize];
+            let error = !ui.error(Page::Submit).get().is_empty() && !ui.busy.get();
+            entries
+                .iter()
+                .enumerate()
+                .map(|(i, (started, name))| {
+                    let end = entries.get(i + 1).map(|r| r.0);
+                    let (state, marker) = if end.is_some() || finished {
+                        ("done", "✓")
+                    } else if error {
+                        ("failed", "×")
+                    } else {
+                        ("running", "…")
+                    };
+                    let duration = end.map(|next| elapsed(next - started)).unwrap_or_default();
+                    view! {
+                        <li data-state=state>
+                            <div class="log-line">
+                                <span class="stage-mark">{marker}</span>
+                                <span>{name.clone()}</span>
+                                <time>{duration}</time>
+                            </div>
+                        </li>
+                    }
+                })
+                .collect_view()
+        })
+    };
+    view! {
+        <ol
+            id="assembly-log"
+            node_ref=log
+            class="build-log"
+            tabindex="0"
+            aria-label="Build stages"
+            aria-live="polite"
+            hidden=move || entries.with(Vec::is_empty)
+        >
+            {rows}
+        </ol>
     }
 }
 #[component]
@@ -570,16 +597,7 @@ pub(super) fn SubmitPage(ui: Ui) -> impl IntoView {
         >
             {move || ui.logs.with(|v| v.last().map(|r| r.1.clone()))}
         </p>
-        <ol
-            id="assembly-log"
-            class="build-log"
-            tabindex="0"
-            aria-label="Build stages"
-            aria-live="polite"
-            hidden=move || ui.logs.with(Vec::is_empty)
-        >
-            {build_log(ui)}
-        </ol>
+        <BuildLog ui />
         <p id="build-total" hidden=move || !done()>
             "Total build time: "
             <time id="build-duration">

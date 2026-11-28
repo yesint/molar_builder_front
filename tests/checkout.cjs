@@ -5,11 +5,23 @@ const origin = process.env.BUILDER_URL || 'http://127.0.0.1:8003';
 const amount = {currency_code: 'USD', value: '1.25'};
 const response = value => ({contentType: 'application/json', body: JSON.stringify(value)});
 
+async function expectLogAtBottom(page, count) {
+    await page.waitForFunction(expected => {
+        const log = document.getElementById('assembly-log');
+        return log.children.length === expected && log.scrollHeight > log.clientHeight &&
+            Math.abs(log.scrollHeight - log.clientHeight - log.scrollTop) <= 1;
+    }, count, {timeout: 8000});
+}
+
 async function checkout(context) {
     const errors = [];
     let buildRequests = 0;
     let paymentChecks = 0;
     let paid = false;
+    const entries = Array.from({length: 40}, (_, i) => [1000 * i, `Stage ${i + 1}`]);
+    let finishBuild;
+    const building = new Promise(resolve => {finishBuild = resolve;});
+    await context.route('**/api/result/progress', route => route.fulfill(response(entries)));
     await context.route('**/api/health', route => route.fulfill(response({mode: 'sandbox', amount})));
     await context.route('**/api/checkout', route => route.fulfill(response({
         order_id: 'TESTORDER12345', amount,
@@ -21,8 +33,9 @@ async function checkout(context) {
         paymentChecks++;
         return route.fulfill(response({paid}));
     });
-    await context.route('**/api/build', route => {
+    await context.route('**/api/build', async route => {
         buildRequests++;
+        await building;
         return route.fulfill({...response({error: 'Test build reached the server.'}), status: 422});
     });
 
@@ -63,6 +76,24 @@ async function checkout(context) {
     assert.ok(paymentChecks > 0);
     paid = true;
     await page.locator('#assemble-system:enabled').click();
+    await expectLogAtBottom(page, 40);
+    const log = page.locator('#assembly-log');
+    await log.evaluate(el => {el.scrollTop = 0;});
+    await page.waitForResponse('**/api/result/progress');
+    await page.evaluate(() => new Promise(resolve => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+    assert.equal(await log.evaluate(el => el.scrollTop), 0);
+    const pageScroll = await page.evaluate(() => window.scrollY);
+    entries.push([40000, 'Next stage']);
+    await expectLogAtBottom(page, 41);
+    assert.equal(await page.evaluate(() => window.scrollY), pageScroll);
+    await page.locator('[data-page=solvent]').click();
+    entries.push([41000, 'Final stage']);
+    await log.locator('li').nth(41).waitFor({state: 'attached'});
+    await page.locator('[data-page=submit]').click();
+    await expectLogAtBottom(page, 42);
+    finishBuild();
     await page.waitForFunction(() => document.querySelector('#assembly-error').textContent === 'Test build reached the server.');
     assert.equal(await page.locator('#protein-error').textContent(), '');
     assert.equal(buildRequests, 1);
@@ -72,7 +103,7 @@ async function checkout(context) {
     const browser = await chromium.launch({executablePath: process.env.CHROMIUM_EXECUTABLE});
     try {
         await checkout(await browser.newContext());
-        console.log('Passed navigation, stage help, checkout terms, sandbox pricing, PayPal cancellation and paid build handoff.');
+        console.log('Passed navigation, stage help, checkout terms, PayPal cancellation, paid build handoff and log autoscroll.');
     } finally {
         await browser.close();
     }
