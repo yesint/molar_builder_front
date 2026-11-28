@@ -19,6 +19,7 @@ async function checkout(context) {
     let paymentChecks = 0;
     let paid = false;
     const entries = Array.from({length: 40}, (_, i) => [1000 * i, `Stage ${i + 1}`]);
+    entries[1] = [320, 'Minimization reached its step limit (maximum force 19952.0 kJ/mol/nm)'];
     let finishBuild;
     const building = new Promise(resolve => {finishBuild = resolve;});
     await context.route('**/api/result/progress', route => route.fulfill(response(entries)));
@@ -78,6 +79,9 @@ async function checkout(context) {
     await page.locator('#assemble-system:enabled').click();
     await expectLogAtBottom(page, 40);
     const log = page.locator('#assembly-log');
+    assert.equal(await log.locator('li').nth(0).locator('time').count(), 0);
+    assert.equal(await log.locator('li').nth(1).locator('time').count(), 0);
+    assert.equal(await log.locator('li').nth(2).locator('time').innerText(), '1.00 s');
     await log.evaluate(el => {el.scrollTop = 0;});
     await page.waitForResponse('**/api/result/progress');
     await page.evaluate(() => new Promise(resolve => {

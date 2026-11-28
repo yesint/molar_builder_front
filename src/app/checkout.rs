@@ -404,13 +404,18 @@ fn BuildLog(ui: Ui) -> impl IntoView {
                     } else {
                         ("running", "…")
                     };
-                    let duration = end.map(|next| elapsed(next - started)).unwrap_or_default();
+                    let duration = end
+                        .filter(|next| {
+                            next - started >= 1000.0
+                                && !name.starts_with("Minimization reached its step limit")
+                        })
+                        .map(|next| elapsed(next - started));
                     view! {
                         <li data-state=state>
                             <div class="log-line">
                                 <span class="stage-mark">{marker}</span>
                                 <span>{name.clone()}</span>
-                                <time>{duration}</time>
+                                {duration.map(|value| view! { <time>{value}</time> })}
                             </div>
                         </li>
                     }
