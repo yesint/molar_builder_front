@@ -57,7 +57,9 @@ function logEntry(parent, label, started) {
 function finish(entry, success, end) {
   if (!entry) return;
   entry.row.dataset.state = success ? "done" : "failed"; entry.mark.textContent = success ? "✓" : "×";
-  setDuration(entry.time, end - entry.started);
+  if (end - entry.started >= 1000 && !entry.label.startsWith("Minimization reached its step limit")) {
+    setDuration(entry.time, end - entry.started);
+  }
 }
 function setDuration(time, elapsed) {
   const seconds = Math.max(0, elapsed) / 1000;
