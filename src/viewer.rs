@@ -358,18 +358,20 @@ async fn watch_edits(
             if !plan.with_untracked(|p| p.partition == partition) {
                 break;
             }
-            match event {
-                MoleculeEvent::Editing { enabled, .. } => editing.set(enabled),
-                MoleculeEvent::Changed { .. } => {
-                    if let Ok(cif) = molecule.export_cif().await {
-                        plan.update(|p| {
-                            if p.partition == partition {
-                                p.edits.insert(index, cif);
-                            }
-                        });
-                    }
+            let capture = match event {
+                MoleculeEvent::Editing { enabled, .. } => {
+                    editing.set(enabled);
+                    enabled
                 }
+                MoleculeEvent::Changed { .. } => true,
                 MoleculeEvent::Removed { .. } => break,
+            };
+            if capture && let Ok(cif) = molecule.export_cif().await {
+                plan.update(|p| {
+                    if p.partition == partition {
+                        p.edits.insert(index, cif);
+                    }
+                });
             }
         }
     });

@@ -87,6 +87,12 @@ fn render_group(ui: Ui, name: String, copies: Vec<Entry>) -> impl IntoView {
     .into_any()
 }
 pub(super) fn setup(ui: Ui) {
+    Effect::new(move |_| {
+        if ui.editing.get() {
+            ui.set_done(2, false);
+            ui.set_done(5, false);
+        }
+    });
     let search = RwSignal::new(String::new());
     on("ligand-resname-search", "input", move |_| {
         search.set(field("ligand-resname-search").value().to_lowercase())

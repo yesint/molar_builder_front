@@ -209,7 +209,14 @@ fn picker_button(ui: Ui, l: Lipid) -> impl IntoView {
                     },
                 );
                 dialog("lipid-picker").close();
-                request_animation_frame(move || focus(&format!("{id}-inner")));
+                request_animation_frame(move || {
+                    if document()
+                        .active_element()
+                        .is_some_and(|e| e.id() == "add-lipid" || e.tag_name() == "BODY")
+                    {
+                        focus(&format!("{id}-inner"));
+                    }
+                });
             }
         >
             <span>

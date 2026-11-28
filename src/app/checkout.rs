@@ -95,6 +95,16 @@ async fn run_submission(
         {
             return Err("Unexpected PayPal approval URL".into());
         }
+        let order_id = order["order_id"]
+            .as_str()
+            .ok_or("Missing PayPal order ID")?;
+        let cancellation_key = format!("molar-cancelled-{order_id}");
+        if let Ok(Some(storage)) = window().local_storage() {
+            let _ = storage.remove_item(&cancellation_key);
+        }
+        if let Ok(Some(storage)) = p.session_storage() {
+            let _ = storage.set_item("molar-popup-order", order_id);
+        }
         p.location()
             .replace(url)
             .map_err(|_| "Cannot open checkout")?;
@@ -108,14 +118,14 @@ async fn run_submission(
             if v["paid"] == true {
                 break;
             }
-            // PayPal returns to the builder origin for cancellation. During approval the
-            // browser prevents reading the cross-origin popup location.
-            let cancelled = p.location().search().ok().is_some_and(|query| {
-                query
-                    .trim_start_matches('?')
-                    .split('&')
-                    .any(|part| part == "checkout=cancel")
-            });
+            // The return tab records the outcome under this order, including when
+            // PayPal isolates its popup from the original window.
+            let cancelled = window()
+                .local_storage()
+                .ok()
+                .flatten()
+                .and_then(|storage| storage.get_item(&cancellation_key).ok().flatten())
+                .is_some();
             if cancelled {
                 return Err("You cancelled checkout. Submit again to resume.".into());
             }
@@ -246,7 +256,32 @@ fn assembly_layers(ui: Ui, metadata: &Value) -> Vec<crate::viewer::Layer> {
 }
 pub(super) fn setup(ui: Ui) {
     let returned = window().location().search().unwrap_or_default();
-    if returned.contains("checkout=") {
+    let parameter = |name: &str| {
+        returned
+            .trim_start_matches('?')
+            .split('&')
+            .filter_map(|s| s.split_once('='))
+            .find(|(key, _)| *key == name)
+            .map(|(_, v)| v.to_owned())
+    };
+    let outcome = parameter("checkout");
+    if outcome.as_deref() == Some("cancel") {
+        let stored = window()
+            .session_storage()
+            .ok()
+            .flatten()
+            .and_then(|s| s.get_item("molar-popup-order").ok().flatten());
+        if let Some(order) = parameter("token").or(stored)
+            && (8..=32).contains(&order.len())
+            && order
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+            && let Ok(Some(storage)) = window().local_storage()
+        {
+            let _ = storage.set_item(&format!("molar-cancelled-{order}"), "true");
+        }
+    }
+    if matches!(outcome.as_deref(), Some("return" | "cancel")) {
         notice(
             "checkout-return",
             if returned.contains("cancel") {
