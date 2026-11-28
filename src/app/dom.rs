@@ -149,3 +149,21 @@ where
         </div>
     }
 }
+
+#[derive(Clone, Copy)]
+pub(super) struct Modal(pub NodeRef<leptos::html::Dialog>);
+impl Modal {
+    pub fn new() -> Self {
+        Self(NodeRef::new())
+    }
+    pub fn open(self) {
+        if let Some(element) = self.0.get_untracked() {
+            let _ = element.show_modal();
+        }
+    }
+    pub fn close(self) {
+        if let Some(element) = self.0.get_untracked() {
+            element.close();
+        }
+    }
+}

@@ -44,6 +44,45 @@ async function components(page) {
     assert.equal(await page.locator('#load-ready').isVisible(), false);
     assert.equal(await page.locator('[data-page=ligands]').getAttribute('href'), null);
 }
+async function protein(page) {
+    const structure = [
+        'ATOM      1  N   THR A   1       0.000   0.000   0.000  1.00  0.00           N',
+        'ATOM      2  CA  THR A   1       1.450   0.000   0.000  1.00  0.00           C',
+        'ATOM      3  C   THR A   1       1.900   1.410   0.000  1.00  0.00           C',
+        'ATOM      4  O   THR A   1       1.290   2.380   0.000  1.00  0.00           O',
+        'ATOM      5  CB  THR A   1       1.910  -0.750   1.250  1.00  0.00           C',
+        'ATOM      6  OG1 THR A   1       3.300  -0.750   1.250  1.00  0.00           O',
+        'ATOM      7  CG2 THR A   1       1.190  -2.030   1.500  1.00  0.00           C',
+        'END',
+    ].join('\n');
+    await page.locator('#structure-file').setInputFiles({name:'site.pdb',mimeType:'chemical/x-pdb',buffer:Buffer.from(structure)});
+    await page.locator('#partition-system').click();
+    await page.locator('#page-proteins:visible').waitFor();
+    await page.locator('#add-mutation').click();
+    await page.locator('#mutation-target').selectOption('SER');
+    await page.locator('#mutation-form button[type=submit]').click();
+    assert.match(await page.locator('#protein-mutations').innerText(), /THR A:1 → SER/);
+    await page.locator('#add-ptm').click();
+    await page.locator('#ptm-type').selectOption('glycosylation');
+    await page.locator('#ptm-search').fill('no matching residue');
+    assert.equal(await page.locator('#ptm-add').isEnabled(),false);
+    await page.locator('#ptm-search').fill('SER A:1');
+    await page.locator('#ptm-add').click();
+    await page.locator('.glycan-item .glycan-buttons button').first().click();
+    await page.locator('#glycan-apply:enabled').waitFor();
+    await page.locator('#glycan-iupac').fill('Gal(b1-4)GlcNAc');
+    await page.waitForFunction(()=>document.querySelectorAll('#glycan-tree [data-node-index]').length===2);
+    await page.locator('#glycan-undo').click();
+    await page.waitForFunction(()=>document.querySelectorAll('#glycan-tree [data-node-index]').length===1);
+    await page.locator('#glycan-add').click();
+    await page.waitForFunction(()=>document.querySelectorAll('#glycan-tree [data-node-index]').length===2);
+    await page.locator('#glycan-apply').click();
+    assert.match(await page.locator('.glycan-item code').textContent(),/GlcNAc/);
+    await page.locator('#orient-protein').uncheck();
+    await page.locator('#build-protein').click();
+    await page.locator('#page-membrane:visible').waitFor();
+    assert.equal(await page.locator('#protein-ready').isVisible(),true);
+}
 (async()=>{
     const browser=await chromium.launch({executablePath:process.env.CHROMIUM_EXECUTABLE, args:['--enable-unsafe-swiftshader','--use-angle=swiftshader']});
     try {
@@ -53,7 +92,8 @@ async function components(page) {
         await page.goto(base);
         await page.waitForFunction(()=>document.querySelector('#add-lipid:enabled'));
         await components(page);
+        await protein(page);
         assert.deepEqual(errors,[]);
-        console.log('Components form passed');
+        console.log('Components and Protein forms passed');
     } finally {await browser.close();}
 })().catch(err=>{console.error(err);process.exitCode=1;});

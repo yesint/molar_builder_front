@@ -555,7 +555,6 @@ pub(super) fn setup(ui: Ui) {
             },
         );
         visible("assembly-viewer", done);
-        visible("protein-built", done && ui.has_protein());
         visible("build-total", done);
         if let Some(r) = &result {
             label("build-duration", &elapsed(r.elapsed));

@@ -39,37 +39,7 @@
         <section id="page-load" aria-labelledby="load-heading">
         </section>
 
-        <section id="page-proteins" aria-labelledby="proteins-heading" hidden>
-          <div class="stage-heading">
-            <h2 id="proteins-heading" tabindex="-1">2. Protein</h2>
-            <button class="secondary help-button" type="button" aria-label="Help for Protein" aria-haspopup="dialog" aria-controls="stage-help"
-              data-help='Choose any changes you want to make to your protein. If you are adding a membrane, select "Orient" to align the protein with it.'>?</button>
-          </div>
-          <div class="protein-layout">
-            <div class="protein-controls">
-              <fieldset id="protein-options" disabled>
-                <div class="protein-section">
-                  <div class="protein-section-heading"><h3>PTMs</h3><button id="add-ptm" class="secondary compact" type="button">Add...</button></div>
-                  <div id="protein-ptms"></div>
-                </div>
-                <div class="protein-section">
-                  <div class="protein-section-heading"><h3>Mutations</h3><button id="add-mutation" class="secondary compact" type="button">Add...</button></div>
-                  <div id="protein-mutations"></div>
-                </div>
-                <div class="protein-section">
-                  <div class="protein-section-heading"><h3>SS bonds</h3><button id="add-ss" class="secondary compact" type="button">Add...</button></div>
-                  <div id="protein-ss"></div>
-                </div>
-                <label class="protein-check"><input id="orient-protein" type="checkbox" checked> Orient</label>
-                <div class="actions"><button id="build-protein" type="button" disabled>Continue</button><span id="protein-built" class="tree-check" role="status" hidden>✓</span></div>
-              </fieldset>
-              <p id="protein-status" role="status" hidden></p>
-              <progress id="protein-progress" hidden></progress>
-              <p id="protein-error" class="error" role="alert" hidden></p>
-            </div>
-            <div id="protein-viewer" class="structure-viewer" aria-label="Protein structure"></div>
-          </div>
-        </section>
+        <section id="page-proteins" aria-labelledby="proteins-heading" hidden></section>
         <section id="page-membrane" aria-labelledby="membrane-heading" hidden>
           <div class="stage-heading">
             <h2 id="membrane-heading" tabindex="-1">4. Membrane</h2>
@@ -246,69 +216,9 @@
     <p id="no-lipids" role="status" hidden>No lipids match your search.</p>
   </dialog>
   <aside id="lipid-hover" class="hover-structure" hidden><strong></strong><img alt=""></aside>
-  <dialog id="mutation-picker">
-      <form id="mutation-form">
-        <h2>Mutate residue</h2>
-        <label>Search residues <input id="mutation-search" type="search"></label>
-        <label>Residue <select id="mutation-residue"></select></label>
-        <label>Mutate to <select id="mutation-target"></select></label>
-        <div class="actions"><button type="submit">Apply</button><button type="button" class="secondary" data-close="mutation-picker">Cancel</button></div>
-      </form>
-    </dialog>
-    <dialog id="ptm-picker" aria-labelledby="ptm-heading">
-    <h2 id="ptm-heading">Add PTM</h2>
-    <form id="ptm-form">
-      <label for="ptm-type">PTM type</label><select id="ptm-type" required><option value="phosphorylation">Phosphorylation</option><option value="palmitoylation">Lipidation: Cys S-palmitoylation</option><option value="glycine_myristoylation">Lipidation: N-terminal Gly myristoylation</option><option value="lysine_myristoylation">Lipidation: Lys myristoylation</option><option value="farnesylation">Lipidation: Cys farnesylation</option><option value="geranylgeranylation">Lipidation: Cys geranylgeranylation</option><option value="triacylation">Lipidation: N-terminal Cys triacylation</option><option value="glycosylation">Glycosilation</option></select>
-      <label for="ptm-search">Search residues</label><input id="ptm-search" type="search" placeholder="Residue number, chain or name">
-      <label for="ptm-residue">Residue</label><select id="ptm-residue" required></select>
-      <p id="ptm-empty" class="small" hidden>No eligible residues.</p>
-      <label id="ptm-charge-label" for="ptm-charge">Charge</label><select id="ptm-charge"><option value="-2">−2</option><option value="-1">−1</option></select>
-      <div class="actions"><button id="ptm-add" type="submit">Add</button><button class="secondary" type="button" data-close="ptm-picker">Cancel</button></div>
-    </form>
-  </dialog>
-  <dialog id="glycan-picker" aria-labelledby="glycan-heading">
-    <h2 id="glycan-heading">Edit glycan</h2>
-    <p id="glycan-attachment"></p>
-    <div class="glycan-editor">
-      <div class="glycan-text">
-        <label for="glycan-iupac">IUPAC</label>
-        <textarea id="glycan-iupac" rows="15" spellcheck="false" autocapitalize="off"></textarea>
-        <div class="actions"><button id="glycan-format" class="secondary compact" type="button">Format</button><button id="glycan-undo" class="secondary compact" type="button">Undo</button></div>
-      </div>
-      <div class="glycan-graphic">
-        <div id="glycan-tree" aria-label="SNFG glycan tree"></div>
-        <fieldset id="glycan-tree-controls" disabled>
-          <h3>Selected sugar: <span id="glycan-selected-label"></span></h3>
-          <div class="glycan-fields">
-            <label>Sugar<select id="glycan-node-sugar"></select></label>
-            <label>Anomer<select id="glycan-node-anomer"><option value="a">α</option><option value="b">β</option></select></label>
-            <label>Donor position<select id="glycan-node-donor" title="The donor is the sugar’s anomeric carbon."></select></label>
-            <label id="glycan-link-field">Acceptor position<select id="glycan-node-position"></select></label>
-            <button id="glycan-remove" class="secondary compact" type="button">Remove branch</button>
-          </div>
-          <h3>Add to selected sugar</h3>
-          <div class="glycan-fields">
-            <label>Sugar<select id="glycan-add-sugar"></select></label>
-            <label>Anomer<select id="glycan-add-anomer"><option value="a">α</option><option value="b" selected>β</option></select></label>
-            <label>Donor position<select id="glycan-add-donor" title="The donor is the sugar’s anomeric carbon."></select></label>
-            <label>Acceptor position<select id="glycan-add-position"></select></label>
-            <button id="glycan-add" class="secondary compact" type="button">Add sugar</button>
-          </div>
-        </fieldset>
-      </div>
-    </div>
-    <p id="glycan-status" class="small" role="status" hidden>Updating glycan…</p>
-    <p id="glycan-error" class="error" role="alert" hidden></p>
-    <div class="actions"><button id="glycan-apply" type="button" disabled>Apply</button><button id="glycan-cancel" class="secondary" type="button">Cancel</button></div>
-  </dialog>
-  <dialog id="ss-picker" aria-labelledby="ss-heading">
-    <h2 id="ss-heading">Add SS bond</h2>
-    <form id="ss-form">
-      <label for="ss-first">Cysteine</label><select id="ss-first" required></select>
-      <label for="ss-second">Cysteine</label><select id="ss-second" required></select>
-      <p id="ss-error" class="error" role="alert" hidden></p>
-      <div class="actions"><button type="submit">Add</button><button class="secondary" type="button" data-close="ss-picker">Cancel</button></div>
-    </form>
-  </dialog>
+
+
+
+
 </body>
 </html>

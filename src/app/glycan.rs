@@ -1,47 +1,48 @@
 use super::*;
-fn remove_branch(tree: &mut Vec<Value>, root: u64) {
-    let mut removed = std::collections::BTreeSet::from([root]);
-    loop {
-        let count = removed.len();
-        for node in tree.iter() {
-            if node["parent"]
-                .as_u64()
-                .is_some_and(|parent| removed.contains(&parent))
-                && let Some(id) = node["id"].as_u64()
-            {
-                removed.insert(id);
-            }
-        }
-        if count == removed.len() {
-            break;
-        }
-    }
-    tree.retain(|node| !node["id"].as_u64().is_some_and(|id| removed.contains(&id)));
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeSet, HashMap};
+#[derive(Clone, PartialEq, Deserialize, Serialize)]
+struct Sugar {
+    id: u64,
+    parent: Option<u64>,
+    position: Option<u8>,
+    sugar: String,
+    anomer: String,
+}
+#[derive(Clone, Default, Deserialize)]
+struct Graph {
+    iupac: String,
+    formatted_iupac: String,
+    root_anomer: String,
+    nodes: Vec<Sugar>,
+    svg: String,
+    sugars: Vec<String>,
+    donors: HashMap<String, u8>,
+    acceptors: HashMap<u64, Vec<u8>>,
+    linkage_labels: HashMap<String, String>,
+    id_map: HashMap<u64, u64>,
 }
 #[derive(Clone, Copy)]
 pub(super) struct Editor {
     ui: Ui,
+    modal: Modal,
     site: RwSignal<u64>,
-    graph: RwSignal<Value>,
+    graph: RwSignal<Graph>,
     selected: RwSignal<u64>,
-    history: RwSignal<Vec<Value>>,
+    history: RwSignal<Vec<Vec<Sugar>>>,
     generation: StoredValue<u64>,
+    text: RwSignal<String>,
+    error: RwSignal<String>,
+    pending: RwSignal<bool>,
+    valid: RwSignal<bool>,
+    tree: NodeRef<leptos::html::Div>,
 }
-fn textarea() -> web_sys::HtmlTextAreaElement {
-    el("glycan-iupac").unchecked_into()
-}
-fn strings(v: &Value) -> Vec<(String, String)> {
-    v.as_array()
-        .into_iter()
-        .flatten()
-        .map(|x| {
-            let s = x
-                .as_str()
-                .map(str::to_owned)
-                .unwrap_or_else(|| x.to_string());
-            (s.clone(), s)
-        })
-        .collect()
+enum Change {
+    Sugar(String),
+    Anomer(String),
+    Position(u8),
+    Remove,
+    Add(String, String, u8),
 }
 fn attachment_label(residue: &Value, anomer: &str) -> String {
     let atom = match residue["name"].as_str() {
@@ -129,189 +130,208 @@ impl Editor {
         }
     }
 
+    pub fn new(ui: Ui) -> Self {
+        Self {
+            ui,
+            modal: Modal::new(),
+            site: RwSignal::new(0),
+            graph: RwSignal::new(Graph::default()),
+            selected: RwSignal::new(0),
+            history: RwSignal::new(vec![]),
+            generation: StoredValue::new(0),
+            text: RwSignal::new(String::new()),
+            error: RwSignal::new(String::new()),
+            pending: RwSignal::new(false),
+            valid: RwSignal::new(false),
+            tree: NodeRef::new(),
+        }
+    }
     pub(super) fn open(self, site: u64) {
         self.site.set(site);
         self.selected.set(0);
-        self.graph.set(Value::Null);
+        self.graph.set(Graph::default());
         self.history.set(vec![]);
-        label("glycan-tree", "");
-        let r = self.residue(self.site.get_untracked());
-        label("glycan-attachment", &components::residue_label(&r));
-        let previous = self
-            .ui
-            .plan
-            .get_untracked()
-            .protein
-            .ptms
-            .into_iter()
-            .find(|m| m["residue"] == site && m["type"] == "glycosylation");
-        let value = previous
-            .as_ref()
-            .and_then(|p| p["iupac"].as_str())
-            .unwrap_or("GlcNAc");
-        textarea().set_value(value);
-        let _ = dialog("glycan-picker").show_modal();
-        self.request(json!({"iupac":value,"root_anomer":previous.as_ref().map_or("b", |ptm| root_anomer(ptm, value))}),true,false);
+        let ptm = self.ui.plan.with_untracked(|p| {
+            p.protein
+                .ptms
+                .iter()
+                .find(|m| m["residue"] == site && m["type"] == "glycosylation")
+                .cloned()
+                .unwrap_or_default()
+        });
+        let value = ptm["iupac"].as_str().unwrap_or("GlcNAc");
+        self.text.set(value.into());
+        self.modal.open();
+        self.request(
+            json!({"iupac":value,"root_anomer": root_anomer(&ptm,value)}),
+            true,
+            false,
+        );
     }
     fn request(self, mut body: Value, format: bool, remember: bool) {
         self.generation.update_value(|n| *n += 1);
-        let gen_id = self.generation.get_value();
+        let generation = self.generation.get_value();
         let old = self.graph.get_untracked();
         body["site"] = self.residue(self.site.get_untracked())["name"].clone();
         if body.get("iupac").is_some() && body.get("root_anomer").is_none() {
-            body["root_anomer"] = json!(old["root_anomer"].as_str().unwrap_or("b"));
+            body["root_anomer"] = json!(old.root_anomer);
         }
-        enabled("glycan-apply", false);
-        enabled("glycan-tree-controls", false);
-        visible("glycan-status", true);
-        visible("glycan-error", false);
+        self.pending.set(true);
+        self.valid.set(false);
+        self.error.set(String::new());
         spawn_local(async move {
             if !format {
                 gloo_timers::future::TimeoutFuture::new(300).await;
-                if self.generation.get_value() != gen_id {
+                if self.generation.get_value() != generation {
                     return;
                 }
             }
-            let result = api::post::<Value>("/api/glycan", &body, None).await;
-            if self.generation.get_value() != gen_id {
+            let response = api::post::<Graph>("/api/glycan", &body, None).await;
+            if self.generation.get_value() != generation {
                 return;
             }
-            visible("glycan-status", false);
-            match result {
-                Ok(value) => {
-                    if remember && !old.is_null() && old["nodes"] != value["nodes"] {
-                        self.history.update(|v| v.push(old));
+            self.pending.set(false);
+            match response {
+                Ok(graph) => {
+                    if remember && !old.nodes.is_empty() && old.nodes != graph.nodes {
+                        self.history.update(|h| h.push(old.nodes));
                     }
                     if format {
-                        textarea().set_value(value["formatted_iupac"].as_str().unwrap_or_default());
+                        self.text.set(graph.formatted_iupac.clone());
                     }
-                    if let Some(id) =
-                        value["id_map"][self.selected.get_untracked().to_string()].as_u64()
-                    {
-                        self.selected.set(id);
-                    }
-                    self.graph.set(value);
-                    self.render();
+                    let next = graph
+                        .id_map
+                        .get(&self.selected.get_untracked())
+                        .copied()
+                        .or_else(|| graph.nodes.first().map(|n| n.id))
+                        .unwrap_or(0);
+                    self.selected.set(next);
+                    self.graph.set(graph);
+                    self.valid.set(true);
                 }
-                Err(err) => {
-                    notice("glycan-error", &err);
-                    if body.get("nodes").is_some() && !old.is_null() {
-                        self.render();
-                    } else {
-                        enabled("glycan-format", false);
-                    }
-                    enabled("glycan-undo", !old.is_null());
+                Err(e) => {
+                    self.error.set(e);
+                    self.valid
+                        .set(body.get("nodes").is_some() && !old.nodes.is_empty());
                 }
             }
         });
     }
-    fn render(self) {
-        let graph = self.graph.get_untracked();
-        let svg = graph["svg"].as_str().unwrap_or("");
-        if let Ok(parser) = web_sys::DomParser::new()
-            && let Ok(doc) = parser.parse_from_string(svg, web_sys::SupportedType::ImageSvgXml)
-            && let Some(root) = doc.document_element()
-        {
-            // Copy only drawing primitives and presentation attributes from the generated SNFG.
-            let host = el("glycan-tree");
-            host.set_text_content(None);
-            if let Some(safe) = drawing(&root) {
-                host.append_child(&safe).unwrap();
-            }
-        }
-        if let Some(labels) = graph["linkage_labels"].as_object() {
-            for (edge, text) in labels {
-                if let Ok(Some(label)) = el("glycan-tree")
-                    .query_selector(&format!("[data-edge-index='{edge}'] text.link"))
-                {
-                    label.set_text_content(text.as_str());
-                }
-            }
-        }
-        let residue = self.residue(self.site.get_untracked());
-        label(
-            "glycan-attachment",
-            &attachment_label(&residue, graph["root_anomer"].as_str().unwrap_or("b")),
-        );
-        options("glycan-node-sugar", strings(&graph["sugars"]));
-        let first = select("glycan-add-sugar").value().is_empty();
-        options("glycan-add-sugar", strings(&graph["sugars"]));
-        if first {
-            select("glycan-add-sugar").set_value("GlcNAc");
-        }
-        enabled("glycan-tree-controls", true);
-        enabled("glycan-apply", true);
-        enabled("glycan-format", true);
-        enabled("glycan-undo", !self.history.with_untracked(Vec::is_empty));
-        self.controls();
+    fn node(self) -> Option<Sugar> {
+        let id = self.selected.get();
+        self.graph
+            .with(|g| g.nodes.iter().find(|n| n.id == id).cloned())
     }
-    fn controls(self) {
-        let g = self.graph.get_untracked();
-        let Some(nodes) = g["nodes"].as_array() else {
-            return;
-        };
-        let Some(node) = nodes
-            .iter()
-            .find(|n| n["id"] == self.selected.get_untracked())
-            .or_else(|| nodes.iter().find(|n| n["parent"].is_null()))
-        else {
-            return;
-        };
-        let id = node["id"].as_u64().unwrap();
-        self.selected.set(id);
-        for n in nodes {
-            let key = n["id"].as_u64().unwrap();
-            if let Ok(Some(shape)) =
-                el("glycan-tree").query_selector(&format!("[data-node-index='{key}']"))
-            {
-                shape.set_attribute("role", "button").unwrap();
-                shape.set_attribute("tabindex", "0").unwrap();
-                shape
-                    .set_attribute("aria-label", n["sugar"].as_str().unwrap_or(""))
-                    .unwrap();
-                shape
-                    .set_attribute("aria-pressed", if key == id { "true" } else { "false" })
-                    .unwrap();
-                let _ = shape
-                    .class_list()
-                    .toggle_with_force("glycan-selected", key == id);
-            }
-        }
-        let root = node["parent"].is_null();
-        let sugar = node["sugar"].as_str().unwrap_or("");
-        label("glycan-selected-label", sugar);
-        select("glycan-node-sugar").set_value(sugar);
-        select("glycan-node-anomer").set_value(node["anomer"].as_str().unwrap_or("b"));
-        visible("glycan-link-field", !root);
-        enabled("glycan-remove", !root);
-        for (prefix, parent, except) in [
-            ("node", node["parent"].as_u64().unwrap_or(id), Some(id)),
-            ("add", id, None),
-        ] {
-            let k = format!("glycan-{prefix}-");
-            let sugar = select(&(k.clone() + "sugar")).value();
-            let donor = g["donors"][&sugar].to_string();
-            options(&(k.clone() + "donor"), [(donor.clone(), donor)]);
-            enabled(&(k.clone() + "donor"), false);
-            let positions = g["acceptors"][parent.to_string()]
-                .as_array()
+    fn positions(self, parent: u64, except: Option<u64>) -> Vec<u8> {
+        self.graph.with(|g| {
+            g.acceptors
+                .get(&parent)
                 .into_iter()
                 .flatten()
-                .filter(|v| {
-                    !nodes.iter().any(|n| {
-                        n["parent"] == parent && n["id"].as_u64() != except && n["position"] == **v
+                .copied()
+                .filter(|p| {
+                    !g.nodes.iter().any(|n| {
+                        n.parent == Some(parent) && Some(n.id) != except && n.position == Some(*p)
                     })
                 })
-                .map(|v| (v.to_string(), v.to_string()))
-                .collect::<Vec<_>>();
-            if prefix == "add" {
-                enabled("glycan-add", !positions.is_empty());
+                .collect()
+        })
+    }
+    fn change(self, action: Change) {
+        let mut nodes = self.graph.with_untracked(|g| g.nodes.clone());
+        let id = self.selected.get_untracked();
+        let Some(node) = nodes.iter_mut().find(|n| n.id == id) else {
+            return;
+        };
+        match action {
+            Change::Sugar(s) => node.sugar = s,
+            Change::Anomer(s) => node.anomer = s,
+            Change::Position(p) => node.position = Some(p),
+            Change::Remove => {
+                if node.parent.is_none() {
+                    return;
+                }
+                let mut removed = BTreeSet::from([id]);
+                loop {
+                    let count = removed.len();
+                    for n in &nodes {
+                        if n.parent.is_some_and(|p| removed.contains(&p)) {
+                            removed.insert(n.id);
+                        }
+                    }
+                    if removed.len() == count {
+                        break;
+                    }
+                }
+                nodes.retain(|n| !removed.contains(&n.id));
             }
-            options(&(k + "position"), positions);
+            Change::Add(sugar, anomer, position) => {
+                let next = nodes.iter().map(|n| n.id).max().unwrap_or(0) + 1;
+                nodes.push(Sugar {
+                    id: next,
+                    sugar,
+                    anomer,
+                    position: Some(position),
+                    parent: Some(id),
+                });
+                self.selected.set(next);
+            }
         }
-        if !root {
-            select("glycan-node-position").set_value(&node["position"].to_string());
+        self.request(json!({"nodes":nodes}), true, true);
+    }
+    fn pick_node(self, event: web_sys::Event) {
+        if let Some(id) = event
+            .target()
+            .and_then(|n| n.dyn_into::<web_sys::Element>().ok())
+            .and_then(|n| n.closest("[data-node-index]").ok().flatten())
+            .and_then(|n| n.get_attribute("data-node-index"))
+            .and_then(|v| v.parse().ok())
+        {
+            event.prevent_default();
+            self.selected.set(id);
         }
+    }
+    fn render_tree(self) {
+        let Some(host) = self.tree.get() else {
+            return;
+        };
+        self.graph.with(|g| {
+            host.set_text_content(None);
+            let Some(svg) = web_sys::DomParser::new()
+                .ok()
+                .and_then(|p| {
+                    p.parse_from_string(&g.svg, web_sys::SupportedType::ImageSvgXml)
+                        .ok()
+                })
+                .and_then(|d| d.document_element())
+                .and_then(|r| drawing(&r))
+            else {
+                return;
+            };
+            for (edge, text) in &g.linkage_labels {
+                if let Ok(Some(label)) =
+                    svg.query_selector(&format!("[data-edge-index='{edge}'] text.link"))
+                {
+                    label.set_text_content(Some(text));
+                }
+            }
+            for node in &g.nodes {
+                if let Ok(Some(shape)) =
+                    svg.query_selector(&format!("[data-node-index='{}']", node.id))
+                {
+                    let pressed = node.id == self.selected.get();
+                    let _ = shape.set_attribute("role", "button");
+                    let _ = shape.set_attribute("tabindex", "0");
+                    let _ = shape.set_attribute("aria-label", &node.sugar);
+                    let _ =
+                        shape.set_attribute("aria-pressed", if pressed { "true" } else { "false" });
+                    let _ = shape
+                        .class_list()
+                        .toggle_with_force("glycan-selected", pressed);
+                }
+            }
+            let _ = host.append_child(&svg);
+        });
     }
 }
 fn drawing(source: &web_sys::Element) -> Option<web_sys::Element> {
@@ -374,116 +394,349 @@ fn drawing(source: &web_sys::Element) -> Option<web_sys::Element> {
     }
     Some(e)
 }
-pub(super) fn setup(ui: Ui) -> Editor {
-    let editor = Editor {
-        ui,
-        site: RwSignal::new(0),
-        graph: RwSignal::new(Value::Null),
-        selected: RwSignal::new(0),
-        history: RwSignal::new(vec![]),
-        generation: StoredValue::new(0),
+#[component]
+pub(super) fn GlycanPicker(editor: Editor) -> impl IntoView {
+    let sugar = RwSignal::new("GlcNAc".to_owned());
+    let anomer = RwSignal::new("b".to_owned());
+    let preferred_position = RwSignal::new(None::<u8>);
+    let invalid = move || !editor.valid.get();
+    let root = move || editor.node().and_then(|n| n.parent).is_none();
+    let sugars = move || editor.graph.with(|g| g.sugars.clone());
+    let positions = move || editor.positions(editor.selected.get(), None);
+    let position = move || {
+        let rows = positions();
+        preferred_position
+            .get()
+            .filter(|p| rows.contains(p))
+            .or_else(|| rows.first().copied())
     };
-    on("glycan-iupac", "input", move |_| {
-        editor.request(json!({"iupac":textarea().value()}), false, true)
-    });
-    click("glycan-format", move || {
-        textarea().set_value(
-            editor.graph.get_untracked()["formatted_iupac"]
-                .as_str()
-                .unwrap_or(""),
-        )
-    });
-    for event in ["click", "keydown"] {
-        on("glycan-tree", event, move |e| {
-            if event == "keydown"
-                && e.dyn_ref::<web_sys::KeyboardEvent>()
-                    .is_none_or(|e| !matches!(e.key().as_str(), "Enter" | " "))
+    Effect::new(move |_| editor.render_tree());
+    let save = move || {
+        let site = editor.site.get_untracked();
+        let graph = editor.graph.get_untracked();
+        editor.ui.plan.update(|p| {
+            if let Some(entry) = p
+                .protein
+                .ptms
+                .iter_mut()
+                .find(|p| p["residue"] == site && p["type"] == "glycosylation")
             {
-                return;
-            }
-            if let Some(node) = e
-                .target()
-                .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-                .and_then(|t| t.closest("[data-node-index]").ok().flatten())
-                .and_then(|t| t.get_attribute("data-node-index"))
-                .and_then(|s| s.parse().ok())
-            {
-                e.prevent_default();
-                editor.selected.set(node);
-                editor.controls();
+                entry["iupac"] = json!(graph.iupac);
+                entry["root_anomer"] = json!(graph.root_anomer);
             }
         });
-    }
-    on("glycan-add-sugar", "change", move |_| editor.controls());
-    for control in [
-        "glycan-node-sugar",
-        "glycan-node-anomer",
-        "glycan-node-position",
-        "glycan-add",
-        "glycan-remove",
-    ] {
-        on(
-            control,
-            if matches!(control, "glycan-add" | "glycan-remove") {
-                "click"
-            } else {
-                "change"
-            },
-            move |_| {
-                let g = editor.graph.get_untracked();
-                let Some(mut nodes) = g["nodes"].as_array().cloned() else {
-                    return;
-                };
-                let id = editor.selected.get_untracked();
-                match control {
-                    "glycan-remove" => remove_branch(&mut nodes, id),
-                    "glycan-add" => {
-                        let next = nodes
-                            .iter()
-                            .filter_map(|n| n["id"].as_u64())
-                            .max()
-                            .unwrap_or(0)
-                            + 1;
-                        nodes.push(json!({"id":next,"parent":id,"sugar":select("glycan-add-sugar").value(),"anomer":select("glycan-add-anomer").value(),"position":select("glycan-add-position").value().parse::<u8>().ok()}));
-                        editor.selected.set(next);
-                    }
-                    _ => {
-                        if let Some(n) = nodes.iter_mut().find(|n| n["id"] == id) {
-                            n["sugar"] = json!(select("glycan-node-sugar").value());
-                            n["anomer"] = json!(select("glycan-node-anomer").value());
-                            if !n["parent"].is_null() {
-                                n["position"] = json!(
-                                    select("glycan-node-position").value().parse::<u8>().ok()
-                                );
+        super::protein::changed(editor.ui);
+        editor.modal.close();
+    };
+    view! {
+        <dialog
+            id="glycan-picker"
+            aria-labelledby="glycan-heading"
+            node_ref=editor.modal.0
+            on:close=move |_| editor.generation.update_value(|n| *n += 1)
+        >
+            <h2 id="glycan-heading">"Edit glycan"</h2>
+            <p id="glycan-attachment">
+                {move || attachment_label(
+                    &editor.residue(editor.site.get()),
+                    &editor.graph.with(|g| g.root_anomer.clone()),
+                )}
+            </p>
+            <div class="glycan-editor">
+                <div class="glycan-text">
+                    <label for="glycan-iupac">"IUPAC"</label>
+                    <textarea
+                        id="glycan-iupac"
+                        rows="15"
+                        spellcheck="false"
+                        autocapitalize="off"
+                        prop:value=move || editor.text.get()
+                        on:input=move |e| {
+                            let text = event_target_value(&e);
+                            editor.text.set(text.clone());
+                            editor.request(json!({"iupac":text}), false, true);
+                        }
+                    ></textarea>
+                    <div class="actions">
+                        <button
+                            id="glycan-format"
+                            class="secondary compact"
+                            type="button"
+                            on:click=move |_| {
+                                editor
+                                    .text
+                                    .set(editor.graph.with_untracked(|g| g.formatted_iupac.clone()))
+                            }
+                            disabled=invalid
+                        >
+                            "Format"
+                        </button>
+                        <button
+                            id="glycan-undo"
+                            class="secondary compact"
+                            type="button"
+                            on:click=move |_| {
+                                let old = if !editor.valid.get_untracked() {
+                                    Some(editor.graph.with_untracked(|g| g.nodes.clone()))
+                                } else {
+                                    editor.history.try_update(Vec::pop).flatten()
+                                };
+                                if let Some(nodes) = old {
+                                    editor.request(json!({"nodes":nodes}), true, false);
+                                }
+                            }
+                            disabled=move || {
+                                editor.pending.get()
+                                    || (editor.history.with(Vec::is_empty)
+                                        && (editor.valid.get()
+                                            || editor.graph.with(|g| g.nodes.is_empty())))
+                            }
+                        >
+                            "Undo"
+                        </button>
+                    </div>
+                </div>
+                <div class="glycan-graphic">
+                    <div
+                        id="glycan-tree"
+                        aria-label="SNFG glycan tree"
+                        node_ref=editor.tree
+                        on:click=move |e| editor.pick_node(e.into())
+                        on:keydown=move |e| {
+                            if matches!(e.key().as_str(), "Enter" | " ") {
+                                editor.pick_node(e.into());
                             }
                         }
-                    }
-                }
-                editor.request(json!({"nodes":nodes}), true, true);
-            },
-        );
+                    ></div>
+                    <fieldset id="glycan-tree-controls" disabled=invalid>
+                        <h3>
+                            "Selected sugar: "
+                            <span id="glycan-selected-label">
+                                {move || editor.node().map(|n| n.sugar)}
+                            </span>
+                        </h3>
+                        <div class="glycan-fields">
+                            <label>
+                                "Sugar"
+                                <select
+                                    id="glycan-node-sugar"
+                                    on:change=move |e| {
+                                        editor.change(Change::Sugar(event_target_value(&e)))
+                                    }
+                                >
+                                    {move || {
+                                        sugars()
+                                            .into_iter()
+                                            .map(|v| {
+                                                let selected = v
+                                                    == (editor.node().map(|n| n.sugar).unwrap_or_default());
+                                                view! {
+                                                    <option value=v selected=selected>
+                                                        {v.clone()}
+                                                    </option>
+                                                }
+                                            })
+                                            .collect_view()
+                                    }}
+                                </select>
+                            </label>
+                            <label>
+                                "Anomer"
+                                <select
+                                    id="glycan-node-anomer"
+                                    prop:value=move || {
+                                        editor.node().map(|n| n.anomer).unwrap_or_default()
+                                    }
+                                    on:change=move |e| {
+                                        editor.change(Change::Anomer(event_target_value(&e)))
+                                    }
+                                >
+                                    <option value="a">"α"</option>
+                                    <option value="b">"β"</option>
+                                </select>
+                            </label>
+                            <label>
+                                "Donor position"
+                                <select
+                                    id="glycan-node-donor"
+                                    title="The donor is the sugar’s anomeric carbon."
+                                    disabled
+                                >
+                                    {move || {
+                                        editor
+                                            .graph
+                                            .with(|g| {
+                                                g.donors
+                                                    .get(&(editor.node().map(|n| n.sugar).unwrap_or_default()))
+                                                    .copied()
+                                            })
+                                            .map(|d| view! { <option value=d>{d}</option> })
+                                    }}
+                                </select>
+                            </label>
+                            <label id="glycan-link-field" hidden=root>
+                                "Acceptor position"
+                                <select
+                                    id="glycan-node-position"
+                                    on:change=move |e| {
+                                        if let Ok(p) = event_target_value(&e).parse() {
+                                            editor.change(Change::Position(p));
+                                        }
+                                    }
+                                >
+                                    {move || {
+                                        editor
+                                            .node()
+                                            .map(|n| {
+                                                editor.positions(n.parent.unwrap_or(n.id), Some(n.id))
+                                            })
+                                            .unwrap_or_default()
+                                            .into_iter()
+                                            .map(|v| {
+                                                let selected = v
+                                                    == (editor.node().and_then(|n| n.position).unwrap_or(0));
+                                                view! {
+                                                    <option value=v selected=selected>
+                                                        {v}
+                                                    </option>
+                                                }
+                                            })
+                                            .collect_view()
+                                    }}
+                                </select>
+                            </label>
+                            <button
+                                id="glycan-remove"
+                                class="secondary compact"
+                                type="button"
+                                disabled=root
+                                on:click=move |_| editor.change(Change::Remove)
+                            >
+                                "Remove branch"
+                            </button>
+                        </div>
+                        <h3>"Add to selected sugar"</h3>
+                        <div class="glycan-fields">
+                            <label>
+                                "Sugar"
+                                <select
+                                    id="glycan-add-sugar"
+                                    on:change=move |e| sugar.set(event_target_value(&e))
+                                >
+                                    {move || {
+                                        sugars()
+                                            .into_iter()
+                                            .map(|v| {
+                                                let selected = v == (sugar.get());
+                                                view! {
+                                                    <option value=v selected=selected>
+                                                        {v.clone()}
+                                                    </option>
+                                                }
+                                            })
+                                            .collect_view()
+                                    }}
+                                </select>
+                            </label>
+                            <label>
+                                "Anomer"
+                                <select
+                                    id="glycan-add-anomer"
+                                    prop:value=move || anomer.get()
+                                    on:change=move |e| anomer.set(event_target_value(&e))
+                                >
+                                    <option value="a">"α"</option>
+                                    <option value="b" selected>
+                                        "β"
+                                    </option>
+                                </select>
+                            </label>
+                            <label>
+                                "Donor position"
+                                <select
+                                    id="glycan-add-donor"
+                                    title="The donor is the sugar’s anomeric carbon."
+                                    disabled
+                                >
+                                    {move || {
+                                        editor
+                                            .graph
+                                            .with(|g| g.donors.get(&(sugar.get())).copied())
+                                            .map(|d| view! { <option value=d>{d}</option> })
+                                    }}
+                                </select>
+                            </label>
+                            <label>
+                                "Acceptor position"
+                                <select
+                                    id="glycan-add-position"
+                                    on:change=move |e| {
+                                        preferred_position.set(event_target_value(&e).parse().ok())
+                                    }
+                                >
+                                    {move || {
+                                        positions()
+                                            .into_iter()
+                                            .map(|v| {
+                                                let selected = v == (position().unwrap_or(0));
+                                                view! {
+                                                    <option value=v selected=selected>
+                                                        {v}
+                                                    </option>
+                                                }
+                                            })
+                                            .collect_view()
+                                    }}
+                                </select>
+                            </label>
+                            <button
+                                id="glycan-add"
+                                class="secondary compact"
+                                type="button"
+                                disabled=move || position().is_none()
+                                on:click=move |_| {
+                                    if let Some(p) = position() {
+                                        editor
+                                            .change(
+                                                Change::Add(
+                                                    sugar.get_untracked(),
+                                                    anomer.get_untracked(),
+                                                    p,
+                                                ),
+                                            );
+                                    }
+                                }
+                            >
+                                "Add sugar"
+                            </button>
+                        </div>
+                    </fieldset>
+                </div>
+            </div>
+            <p id="glycan-status" class="small" role="status" hidden=move || !editor.pending.get()>
+                "Updating glycan…"
+            </p>
+            <p
+                id="glycan-error"
+                class="error"
+                role="alert"
+                hidden=move || editor.error.with(String::is_empty)
+            >
+                {move || editor.error.get()}
+            </p>
+            <div class="actions">
+                <button id="glycan-apply" type="button" disabled=invalid on:click=move |_| save()>
+                    "Apply"
+                </button>
+                <button
+                    id="glycan-cancel"
+                    class="secondary"
+                    type="button"
+                    on:click=move |_| editor.modal.close()
+                >
+                    "Cancel"
+                </button>
+            </div>
+        </dialog>
     }
-    click("glycan-undo", move || {
-        let old = if el("glycan-apply").has_attribute("disabled") {
-            Some(editor.graph.get_untracked())
-        } else {
-            editor.history.try_update(Vec::pop).flatten()
-        };
-        if let Some(old) = old {
-            editor.request(json!({"nodes":old["nodes"]}), true, false);
-        }
-    });
-    click("glycan-cancel", || dialog("glycan-picker").close());
-    on("glycan-picker", "close", move |_| {
-        editor.generation.update_value(|n| *n += 1)
-    });
-    click("glycan-apply", move || {
-        let g = editor.graph.get_untracked();
-        let site = editor.site.get_untracked();
-        ui.plan.update(|p|{p.protein.ptms.retain(|m|m["residue"]!=site);p.protein.ptms.push(json!({"type":"glycosylation","residue":site,"iupac":g["iupac"],"root_anomer":g["root_anomer"]}));});
-        ui.set_done(1, false);
-        ui.set_done(5, false);
-        dialog("glycan-picker").close();
-    });
-    editor
 }
