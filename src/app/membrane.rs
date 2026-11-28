@@ -13,10 +13,8 @@ fn update(ui: Ui, f: impl FnOnce(&mut Membrane)) {
             f(m);
         }
     });
-    ui.confirmed.update(|v| {
-        v[Page::Membrane as usize] = false;
-        v[Page::Submit as usize] = false;
-    });
+    ui.set_done(Page::Membrane, false);
+    ui.invalidate_build();
 }
 fn row(ui: Ui, row: Row, state: PickerState, composition: Memo<Composition>) -> impl IntoView {
     let l = ui
@@ -216,7 +214,7 @@ pub(super) fn MembranePage(ui: Ui) -> impl IntoView {
         })
     });
     let error = move || {
-        let msg = ui.msg.get();
+        let msg = ui.error(Page::Membrane).get();
         if msg.is_empty() {
             composition.with(|c| c.error.clone())
         } else {
@@ -258,7 +256,7 @@ pub(super) fn MembranePage(ui: Ui) -> impl IntoView {
         });
         ui.set_done(Page::Membrane, false);
         ui.set_done(Page::Solvent, false);
-        ui.set_done(Page::Submit, false);
+        ui.invalidate_build();
     };
     view! {
         <StageHeading ui page=Page::Membrane />
@@ -631,7 +629,7 @@ pub(super) fn MembranePage(ui: Ui) -> impl IntoView {
                             type="button"
                             on:click=move |_| {
                                 ui.set_done(Page::Membrane, false);
-                                ui.set_done(Page::Submit, false);
+                                ui.invalidate_build();
                             }
                         >
                             "Edit..."

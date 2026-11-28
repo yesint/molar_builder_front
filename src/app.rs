@@ -29,7 +29,7 @@ struct Ui {
     headings: [NodeRef<leptos::html::H2>; 6],
     panels: [NodeRef<leptos::html::Div>; 4],
     busy: RwSignal<bool>,
-    msg: RwSignal<String>,
+    errors: [RwSignal<String>; 6],
     uploads: RwSignal<Vec<Upload>>,
     choices: RwSignal<Vec<Selection>>,
     files: RwSignal<Vec<components::Source>>,
@@ -67,22 +67,26 @@ impl Ui {
             Panel::Assembly => self.confirmed.get()[Page::Submit as usize],
         }
     }
+    fn error(self, page: Page) -> RwSignal<String> {
+        self.errors[page as usize]
+    }
     fn task(self, f: impl Future<Output = Result<(), String>> + 'static) {
         if self.busy.get_untracked() {
             return;
         }
         self.busy.set(true);
-        self.msg.set(String::new());
+        let error = self.error(self.stage.get_untracked());
+        error.set(String::new());
         spawn_local(async move {
             if let Err(e) = f.await {
-                self.msg.set(e)
+                error.set(e)
             }
             self.busy.set(false)
         });
     }
     fn has_protein(self) -> bool {
         self.part
-            .with(|p| p.as_ref().is_some_and(|p| !p.protein.is_null()))
+            .with(|p| p.as_ref().is_some_and(|p| p.protein.is_some()))
     }
     fn has_ligands(self) -> bool {
         self.part
@@ -91,10 +95,16 @@ impl Ui {
     fn set_done(self, step: Page, done: bool) {
         self.confirmed.update(|flags| flags[step as usize] = done);
     }
+    fn invalidate_build(self) {
+        self.set_done(Page::Submit, false);
+        self.logs.set(Vec::new());
+        self.error(Page::Submit).set(String::new());
+    }
     fn invalidate_components(self) {
+        self.invalidate_build();
         self.part.set(None);
         self.confirmed.update(|flags| {
-            for i in [Page::Components, Page::Protein, Page::Ligands, Page::Submit] {
+            for i in [Page::Components, Page::Protein, Page::Ligands] {
                 flags[i as usize] = false;
             }
         });
@@ -149,14 +159,16 @@ impl Ui {
             .filter(|s| !s.protein_selection.is_empty() || !s.ligand_selection.is_empty())
             .collect::<Vec<_>>();
         if !choices.is_empty() && self.part.get_untracked().is_none() {
-            let p: Partition = api::post("/api/partition", &choices, None).await?;
+            let mut p: Partition = api::post("/api/partition", &choices, None).await?;
+            if let Some(protein) = &mut p.protein {
+                protein.mark_duplicate_numbers();
+            }
             self.plan.update(|v| {
                 v.partition = Some(p.id.clone());
-                v.protein.ss_bonds = p.protein["ss_bonds"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|b| serde_json::from_value(b["residues"].clone()).ok())
+                v.protein.ss_bonds = p
+                    .protein
+                    .iter()
+                    .flat_map(|p| p.ss_bonds.iter().map(|b| b.residues))
                     .collect();
             });
             self.part.set(Some(p));
@@ -174,7 +186,7 @@ pub fn Builder() -> impl IntoView {
         headings: std::array::from_fn(|_| NodeRef::new()),
         panels: std::array::from_fn(|_| NodeRef::new()),
         busy: RwSignal::new(false),
-        msg: RwSignal::new(String::new()),
+        errors: std::array::from_fn(|_| RwSignal::new(String::new())),
         uploads: RwSignal::new(vec![]),
         choices: RwSignal::new(vec![]),
         files: RwSignal::new(vec![]),
@@ -201,7 +213,15 @@ pub fn Builder() -> impl IntoView {
         rx,
         viewer,
         ui.plan,
-        ui.msg,
+        move |panel, error| {
+            let page = match panel {
+                Panel::Load => Page::Components,
+                Panel::Protein => Page::Protein,
+                Panel::Ligand => Page::Ligands,
+                Panel::Assembly => Page::Submit,
+            };
+            ui.error(page).set(error);
+        },
         ui.editing,
     ));
     route(ui);
@@ -247,7 +267,10 @@ pub fn Builder() -> impl IntoView {
     spawn_local(async move {
         match api::get::<Value>("/api/health").await {
             Ok(v) => ui.health.set(v),
-            Err(e) => ui.msg.set(e),
+            Err(e) => {
+                ui.error(Page::Components).set(e.clone());
+                ui.error(Page::Submit).set(e);
+            }
         }
         match gloo_net::http::Request::get("./membrane-assets/catalog.json")
             .send()
@@ -255,9 +278,9 @@ pub fn Builder() -> impl IntoView {
         {
             Ok(r) => match r.json::<Catalogue>().await {
                 Ok(c) => ui.catalog.set(c.lipids),
-                Err(e) => ui.msg.set(e.to_string()),
+                Err(e) => ui.error(Page::Membrane).set(e.to_string()),
             },
-            Err(e) => ui.msg.set(e.to_string()),
+            Err(e) => ui.error(Page::Membrane).set(e.to_string()),
         }
     });
     view! { <Workspace ui standby /> }

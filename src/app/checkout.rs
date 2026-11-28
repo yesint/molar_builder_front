@@ -308,17 +308,12 @@ fn summary(ui: Ui) -> impl IntoView {
                 details.push("orientation".to_string());
             }
             for m in p.protein.mutations {
-                details.push(format!(
-                    "resindex {} → {}",
-                    m["residue"],
-                    m["target"].as_str().unwrap_or("")
-                ));
+                details.push(format!("resindex {} → {}", m.residue, m.target));
             }
             for m in p.protein.ptms {
-                let name = if m["iupac"].as_str().is_some_and(|s| !s.is_empty()) {
-                    "glycan".to_owned()
-                } else {
-                    m["type"].as_str().unwrap_or("").replace('_', " ")
+                let name = match m.modification {
+                    Modification::Glycosylation(_) => "glycan".into(),
+                    other => other.key().replace('_', " "),
                 };
                 if !details.contains(&name) {
                     details.push(name);
@@ -383,7 +378,7 @@ fn build_log(ui: Ui) -> impl IntoView {
     move || {
         let entries = ui.logs.get();
         let finished = ui.confirmed.get()[Page::Submit as usize];
-        let error = !ui.msg.get().is_empty() && !ui.busy.get();
+        let error = !ui.error(Page::Submit).get().is_empty() && !ui.busy.get();
         entries
             .iter()
             .enumerate()
@@ -426,12 +421,13 @@ pub(super) fn SubmitPage(ui: Ui) -> impl IntoView {
             match window().open_with_url_and_target("about:blank", "_blank") {
                 Ok(Some(w)) => Some(w),
                 _ => {
-                    ui.msg
+                    ui.error(Page::Submit)
                         .set("Allow the PayPal checkout window and submit again.".into());
                     return;
                 }
             }
         };
+        archive_notice.set(String::new());
         popup.set_value(window.clone());
         waiting.set(window.is_some());
         ui.logs.set(vec![]);
@@ -480,7 +476,7 @@ pub(super) fn SubmitPage(ui: Ui) -> impl IntoView {
                             )),
                         }
                     }
-                    Err(e) => ui.msg.set(e),
+                    Err(e) => ui.error(Page::Submit).set(e),
                 }
             });
         }
@@ -557,7 +553,7 @@ pub(super) fn SubmitPage(ui: Ui) -> impl IntoView {
             <button
                 id="retry-viewer"
                 type="button"
-                hidden=move || !done() || ui.msg.with(String::is_empty)
+                hidden=move || !done() || ui.error(Page::Submit).with(String::is_empty)
                 on:click=retry
             >
                 "Retry viewer"
@@ -598,9 +594,9 @@ pub(super) fn SubmitPage(ui: Ui) -> impl IntoView {
             id="assembly-error"
             class="error"
             role="alert"
-            hidden=move || ui.msg.with(String::is_empty)
+            hidden=move || ui.error(Page::Submit).with(String::is_empty)
         >
-            {move || ui.msg.get()}
+            {move || ui.error(Page::Submit).get()}
         </p>
         <ViewerSurface ui panel=Panel::Assembly />
     }

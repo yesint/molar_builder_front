@@ -120,7 +120,7 @@ pub(super) fn LigandsPage(ui: Ui) -> impl IntoView {
     Effect::new(move |_| {
         if ui.editing.get() {
             ui.set_done(Page::Ligands, false);
-            ui.set_done(Page::Submit, false);
+            ui.invalidate_build();
         }
     });
     let search = RwSignal::new(String::new());
@@ -142,7 +142,7 @@ pub(super) fn LigandsPage(ui: Ui) -> impl IntoView {
                 if let Err(e) =
                     checkout::save_file(&format!("ligand-{}-parameters.zip", i + 1), &bytes).await
                 {
-                    ui.msg.set(e);
+                    ui.error(Page::Ligands).set(e);
                 }
             });
         }
@@ -204,9 +204,9 @@ pub(super) fn LigandsPage(ui: Ui) -> impl IntoView {
                     id="ligand-error"
                     class="error"
                     role="alert"
-                    hidden=move || ui.msg.with(String::is_empty)
+                    hidden=move || ui.error(Page::Ligands).with(String::is_empty)
                 >
-                    {move || ui.msg.get()}
+                    {move || ui.error(Page::Ligands).get()}
                 </p>
             </div>
             <ViewerSurface ui panel=Panel::Ligand />

@@ -439,7 +439,7 @@ pub async fn serve(
     mut actions: UnboundedReceiver<Action>,
     viewer: Viewer,
     plan: RwSignal<Plan>,
-    message: RwSignal<String>,
+    report_error: impl Fn(Panel, String),
     editing: RwSignal<bool>,
 ) {
     let mut controller = Controller {
@@ -477,7 +477,7 @@ pub async fn serve(
             if let Some(p) = panel {
                 viewer.status[p as usize].set("unavailable");
             }
-            message.set(error);
+            report_error(panel.unwrap_or(Panel::Ligand), error);
         } else if let Some(p) = panel {
             viewer.status[p as usize].set("rendered");
         }

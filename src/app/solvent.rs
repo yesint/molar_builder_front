@@ -10,7 +10,7 @@ pub(super) fn SolventPage(ui: Ui) -> impl IntoView {
     let membrane = move || ui.plan.with(|p| p.membrane.is_some());
     let invalidate = move || {
         ui.set_done(Page::Solvent, false);
-        ui.set_done(Page::Submit, false);
+        ui.invalidate_build();
     };
     let save = move || {
         ui.plan.update(|p| p.solvent = Some(draft.get_untracked()));

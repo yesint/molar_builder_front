@@ -44,22 +44,19 @@ enum Change {
     Remove,
     Add(String, String, u8),
 }
-fn attachment_label(residue: &Value, anomer: &str) -> String {
-    let atom = match residue["name"].as_str() {
-        Some("ASN") => "ND2",
-        Some("THR") => "OG1",
+fn attachment_label(residue: &Residue, anomer: &str) -> String {
+    let atom = match residue.name.as_str() {
+        "ASN" => "ND2",
+        "THR" => "OG1",
         _ => "OG",
     };
     let symbol = if anomer == "a" { "α" } else { "β" };
-    format!(
-        "{} ({symbol}1 → {atom})",
-        components::residue_label(residue)
-    )
+    format!("{} ({symbol}1 → {atom})", residue.label())
 }
 
-fn root_anomer<'a>(ptm: &'a Value, sequence: &str) -> &'a str {
-    if let Some(anomer) = ptm["root_anomer"].as_str().filter(|s| !s.is_empty()) {
-        return anomer;
+fn root_anomer<'a>(ptm: &'a Glycan, sequence: &str) -> &'a str {
+    if !ptm.root_anomer.is_empty() {
+        return &ptm.root_anomer;
     }
     let compact: String = sequence.split_whitespace().collect();
     if let Some((_, linkage)) = compact.strip_suffix('-').and_then(|s| s.rsplit_once("(a"))
@@ -73,11 +70,11 @@ fn root_anomer<'a>(ptm: &'a Value, sequence: &str) -> &'a str {
 }
 
 impl Editor {
-    fn residue(self, site: u64) -> Value {
+    fn residue(self, site: u64) -> Residue {
         let mut residue = self.ui.part.with_untracked(|p| {
             p.as_ref()
-                .and_then(|p| p.protein["residues"].as_array())
-                .and_then(|r| r.iter().find(|r| r["id"] == site))
+                .and_then(|p| p.protein.as_ref().map(|p| &p.residues))
+                .and_then(|r| r.iter().find(|r| r.id == site))
                 .cloned()
                 .unwrap_or_default()
         });
@@ -88,20 +85,15 @@ impl Editor {
             .protein
             .mutations
             .iter()
-            .find(|m| m["residue"] == residue["id"])
+            .find(|m| m.residue == site)
         {
-            residue["name"] = m["target"].clone();
+            residue.name.clone_from(&m.target);
         }
         residue
     }
-    pub(super) fn row(self, site: u64, ptm: Value, remove: impl Fn() + 'static) -> impl IntoView {
-        let sequence: String = ptm["iupac"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .unwrap_or("GlcNAc")
-            .split_whitespace()
-            .collect();
-        let label = attachment_label(&self.residue(site), root_anomer(&ptm, &sequence));
+    pub(super) fn row(self, site: u64, ptm: &Glycan, remove: impl Fn() + 'static) -> impl IntoView {
+        let sequence: String = ptm.iupac.split_whitespace().collect();
+        let label = attachment_label(&self.residue(site), root_anomer(ptm, &sequence));
         let remove_label = format!("Remove glycan from {label}");
         view! {
             <div class="protein-item glycan-item">
@@ -152,15 +144,16 @@ impl Editor {
         self.graph.set(Graph::default());
         self.history.set(vec![]);
         let ptm = self.ui.plan.with_untracked(|p| {
-            p.protein
-                .ptms
-                .iter()
-                .find(|m| m["residue"] == site && m["type"] == "glycosylation")
-                .cloned()
-                .unwrap_or_default()
+            p.protein.ptms.iter().find_map(|m| match &m.modification {
+                Modification::Glycosylation(g) if m.residue == site => Some(g.clone()),
+                _ => None,
+            })
         });
-        let value = ptm["iupac"].as_str().unwrap_or("GlcNAc");
-        self.text.set(value.into());
+        let Some(ptm) = ptm else {
+            return;
+        };
+        let value = &ptm.iupac;
+        self.text.set(value.clone());
         self.modal.open();
         self.request(
             json!({"iupac":value,"root_anomer": root_anomer(&ptm,value)}),
@@ -172,7 +165,7 @@ impl Editor {
         self.generation.update_value(|n| *n += 1);
         let generation = self.generation.get_value();
         let old = self.graph.get_untracked();
-        body["site"] = self.residue(self.site.get_untracked())["name"].clone();
+        body["site"] = json!(self.residue(self.site.get_untracked()).name);
         if body.get("iupac").is_some() && body.get("root_anomer").is_none() {
             body["root_anomer"] = json!(old.root_anomer);
         }
@@ -415,14 +408,11 @@ pub(super) fn GlycanPicker(editor: Editor) -> impl IntoView {
         let site = editor.site.get_untracked();
         let graph = editor.graph.get_untracked();
         editor.ui.plan.update(|p| {
-            if let Some(entry) = p
-                .protein
-                .ptms
-                .iter_mut()
-                .find(|p| p["residue"] == site && p["type"] == "glycosylation")
+            if let Some(entry) = p.protein.ptms.iter_mut().find(|p| p.residue == site)
+                && let Modification::Glycosylation(glycan) = &mut entry.modification
             {
-                entry["iupac"] = json!(graph.iupac);
-                entry["root_anomer"] = json!(graph.root_anomer);
+                glycan.iupac = graph.iupac;
+                glycan.root_anomer = graph.root_anomer;
             }
         });
         super::protein::changed(editor.ui);

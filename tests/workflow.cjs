@@ -137,6 +137,12 @@ async function ligand(page, webgpu) {
             await original.close();
         }
         await saveResult(page);
+        await page.locator('[data-page=solvent]').click();
+        await page.locator('#salt-concentration').fill('0.20');
+        await page.locator('#continue-solvent').click();
+        assert.equal(await page.locator('#assembly-log').isVisible(), false);
+        assert.equal(await page.locator('#assembly-ready').isVisible(), false);
+        assert.equal(await page.locator('#assembly-download').innerText(), 'Save previous ZIP');
         await ligand(page, webgpu);
         assert.deepEqual(errors, []);
         console.log('Passed membrane and ligand builds, viewer controls, and archive downloads.');

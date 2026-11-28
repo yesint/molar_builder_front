@@ -7,6 +7,7 @@ pub(super) struct Source {
     name: String,
     extra: bool,
     models: Vec<Model>,
+    active_model: [RwSignal<usize>; 2],
 }
 #[derive(Clone)]
 struct Model {
@@ -14,6 +15,7 @@ struct Model {
     groups: [Vec<Group>; 2],
     selected: [RwSignal<BTreeSet<String>>; 2],
     custom: [RwSignal<Vec<String>>; 2],
+    draft: [RwSignal<String>; 2],
 }
 #[derive(Clone)]
 struct Group {
@@ -115,6 +117,7 @@ impl Model {
             upload,
             groups,
             selected: selected.map(RwSignal::new),
+            draft: std::array::from_fn(|_| RwSignal::new(String::new())),
             custom: std::array::from_fn(|_| RwSignal::new(vec![])),
         }
     }
@@ -352,14 +355,11 @@ fn group(ui: Ui, source: Source, role: usize) -> impl IntoView {
 }
 fn custom(ui: Ui, source: Source, role: usize) -> impl IntoView {
     let models = StoredValue::new(source.models);
-    let active = RwSignal::new(0usize);
-    let drafts = StoredValue::new(models.with_value(|rows| {
-        rows.iter()
-            .map(|_| RwSignal::new(String::new()))
-            .collect::<Vec<_>>()
-    }));
+    let active = source.active_model[role];
     let input = NodeRef::<leptos::html::Input>::new();
-    let draft = move || drafts.with_value(|v| v[active.get()]);
+    let draft = move || models.with_value(|v| v[active.get()].draft[role]);
+    let role_name = ["protein", "ligand"][role];
+    let filename = StoredValue::new(source.name.clone());
     let add = move || {
         let value = draft().get_untracked().trim().to_string();
         if value.is_empty() {
@@ -394,15 +394,21 @@ fn custom(ui: Ui, source: Source, role: usize) -> impl IntoView {
                         (ms.len() > 1)
                             .then(|| {
                                 view! {
-                                    <select on:change=move |e| {
-                                        active.set(event_target_value(&e).parse().unwrap_or(0))
-                                    }>
+                                    <select
+                                        aria-label=format!(
+                                            "Model for {} {role_name} selection",
+                                            source.name,
+                                        )
+                                        on:change=move |e| {
+                                            active.set(event_target_value(&e).parse().unwrap_or(0))
+                                        }
+                                    >
                                         {ms
                                             .iter()
                                             .enumerate()
                                             .map(|(i, m)| {
                                                 view! {
-                                                    <option value=i>
+                                                    <option value=i prop:selected=move || i == active.get()>
                                                         {format!(
                                                             "{} {}",
                                                             if m.upload.format == "sdf" { "mol" } else { "model" },
@@ -449,36 +455,72 @@ fn custom(ui: Ui, source: Source, role: usize) -> impl IntoView {
                     models
                         .with_value(|ms| {
                             ms.iter()
-                                .flat_map(|m| {
+                                .enumerate()
+                                .flat_map(|(model_index, m)| {
                                     let saved = m.custom[role];
+                                    let model_name = format!(
+                                        "{} {}",
+                                        if m.upload.format == "sdf" { "mol" } else { "model" },
+                                        model_index + 1,
+                                    );
+                                    let multiple = ms.len() > 1;
                                     saved
                                         .get()
                                         .into_iter()
                                         .enumerate()
                                         .map(move |(i, item)| {
+                                            let label = filename
+                                                .with_value(|name| {
+                                                    format!(
+                                                        "{name}, {model_name}, saved {role_name} selection {}",
+                                                        i + 1,
+                                                    )
+                                                });
+                                            let remove_label = filename
+                                                .with_value(|name| {
+                                                    format!(
+                                                        "Remove {role_name} selection {item} from {name}, {model_name}",
+                                                    )
+                                                });
                                             view! {
                                                 <li>
+                                                    {multiple
+                                                        .then(|| view! { <span>{model_name.clone()}</span> })}
                                                     <input
+                                                        type="text"
+                                                        spellcheck="false"
+                                                        aria-label=label
                                                         prop:value=item
-                                                        on:change=move |e| {
-                                                            let input = event_target::<HtmlInputElement>(&e);
-                                                            let value = input.value().trim().to_owned();
-                                                            if value.is_empty() {
-                                                                saved.with_untracked(|v| input.set_value(&v[i]));
-                                                                return;
+                                                        on:keydown=move |event| {
+                                                            if event.key() == "Enter" {
+                                                                event.prevent_default();
+                                                                let _ = event_target::<HtmlInputElement>(&event).blur();
                                                             }
-                                                            saved.update(|v| v[i] = value);
-                                                            ui.invalidate_components();
+                                                        }
+                                                        on:change=move |e| {
+                                                            let field = event_target::<HtmlInputElement>(&e);
+                                                            let value = field.value().trim().to_owned();
+                                                            if value.is_empty() {
+                                                                saved.with_untracked(|v| field.set_value(&v[i]));
+                                                            } else {
+                                                                saved.update(|v| v[i] = value);
+                                                                ui.invalidate_components();
+                                                            }
                                                         }
                                                     />
                                                     <button
                                                         class="secondary compact"
+                                                        aria-label=remove_label
+                                                        type="button"
                                                         on:click=move |_| {
                                                             saved
                                                                 .update(|v| {
                                                                     v.remove(i);
                                                                 });
                                                             ui.invalidate_components();
+                                                            if let Some(field) = input.get_untracked() {
+                                                                let _ = field.focus();
+                                                            }
                                                         }
                                                     >
                                                         "×"
@@ -534,6 +576,7 @@ fn FilePicker(ui: Ui, extra: bool, status: RwSignal<&'static str>) -> impl IntoV
                     .map(|(i, u)| Model::new(u, i, extra))
                     .collect();
                 batch.push(Source {
+                    active_model: std::array::from_fn(|_| RwSignal::new(0)),
                     name,
                     extra,
                     models,
@@ -779,9 +822,9 @@ pub(super) fn ComponentsPage(ui: Ui) -> impl IntoView {
                     id="load-error"
                     class="error"
                     role="alert"
-                    hidden=move || ui.msg.with(String::is_empty)
+                    hidden=move || ui.error(Page::Components).with(String::is_empty)
                 >
-                    {move || ui.msg.get()}
+                    {move || ui.error(Page::Components).get()}
                 </p>
             </div>
             <ViewerSurface ui panel=Panel::Load />

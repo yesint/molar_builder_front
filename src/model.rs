@@ -41,12 +41,112 @@ pub struct Solvent {
     pub concentration: f64,
     pub neutralize: bool,
 }
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Mutation {
+    pub residue: u64,
+    pub target: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Ptm {
+    pub residue: u64,
+    #[serde(flatten)]
+    pub modification: Modification,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Glycan {
+    pub iupac: String,
+    #[serde(default)]
+    pub root_anomer: String,
+}
+impl Default for Glycan {
+    fn default() -> Self {
+        Self {
+            iupac: "GlcNAc".into(),
+            root_anomer: "b".into(),
+        }
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Modification {
+    Phosphorylation { charge: i32 },
+    Palmitoylation,
+    GlycineMyristoylation,
+    LysineMyristoylation,
+    Farnesylation,
+    Geranylgeranylation,
+    Triacylation,
+    Glycosylation(Glycan),
+}
+impl Modification {
+    pub fn key(&self) -> &'static str {
+        match self {
+            Self::Phosphorylation { .. } => "phosphorylation",
+            Self::Palmitoylation => "palmitoylation",
+            Self::GlycineMyristoylation => "glycine_myristoylation",
+            Self::LysineMyristoylation => "lysine_myristoylation",
+            Self::Farnesylation => "farnesylation",
+            Self::Geranylgeranylation => "geranylgeranylation",
+            Self::Triacylation => "triacylation",
+            Self::Glycosylation(_) => "glycosylation",
+        }
+    }
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Phosphorylation { .. } => "Phosphorylation",
+            Self::Palmitoylation => "S-palmitoylation",
+            Self::GlycineMyristoylation => "N-myristoylation",
+            Self::LysineMyristoylation => "Lys myristoylation",
+            Self::Farnesylation => "S-farnesylation",
+            Self::Geranylgeranylation => "S-geranylgeranylation",
+            Self::Triacylation => "Triacylation",
+            Self::Glycosylation(_) => "Glycosylation",
+        }
+    }
+    pub fn uses_cysteine_sulfur(&self) -> bool {
+        matches!(
+            self,
+            Self::Palmitoylation
+                | Self::Farnesylation
+                | Self::Geranylgeranylation
+                | Self::Triacylation
+        )
+    }
+    pub fn choices() -> [(Self, &'static str); 8] {
+        [
+            (Self::Phosphorylation { charge: -2 }, "Phosphorylation"),
+            (Self::Palmitoylation, "Lipidation: Cys S-palmitoylation"),
+            (
+                Self::GlycineMyristoylation,
+                "Lipidation: N-terminal Gly myristoylation",
+            ),
+            (Self::LysineMyristoylation, "Lipidation: Lys myristoylation"),
+            (Self::Farnesylation, "Lipidation: Cys farnesylation"),
+            (
+                Self::Geranylgeranylation,
+                "Lipidation: Cys geranylgeranylation",
+            ),
+            (
+                Self::Triacylation,
+                "Lipidation: N-terminal Cys triacylation",
+            ),
+            (Self::Glycosylation(Glycan::default()), "Glycosylation"),
+        ]
+    }
+}
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Protein {
     pub orient: bool,
-    pub mutations: Vec<Value>,
-    pub ptms: Vec<Value>,
+    pub mutations: Vec<Mutation>,
+    #[serde(serialize_with = "serialize_ptms")]
+    pub ptms: Vec<Ptm>,
     pub ss_bonds: Vec<[usize; 2]>,
+}
+// Preserve the field order of earlier checkout payloads because their hash identifies a pending order.
+fn serialize_ptms<S: serde::Serializer>(ptms: &[Ptm], serializer: S) -> Result<S::Ok, S::Error> {
+    serde_json::to_value(ptms)
+        .map_err(serde::ser::Error::custom)?
+        .serialize(serializer)
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Plan {
@@ -97,10 +197,73 @@ pub struct Upload {
     pub format: String,
     pub report: Value,
 }
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+pub struct Residue {
+    pub id: u64,
+    pub name: String,
+    pub number: i64,
+    pub chain: String,
+    #[serde(default)]
+    pub n_terminal: bool,
+    #[serde(default)]
+    pub protein: bool,
+    #[serde(default)]
+    pub coarse_grained: bool,
+    pub preview_index: Option<u64>,
+    #[serde(skip)]
+    pub duplicate_number: bool,
+}
+impl Residue {
+    pub fn label(&self) -> String {
+        let chain = self.chain.trim();
+        let chain = if chain.is_empty() {
+            String::new()
+        } else {
+            format!("{chain}:")
+        };
+        let mut label = format!("{} {chain}{}", self.name, self.number);
+        if self.duplicate_number {
+            label.push_str(&format!(" (resindex {})", self.id));
+        }
+        label
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Disulfide {
+    pub residues: [usize; 2],
+    pub distance_nm: Option<f64>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProteinInventory {
+    pub residues: Vec<Residue>,
+    #[serde(default)]
+    pub ptms: Vec<Residue>,
+    #[serde(default)]
+    pub ss_bonds: Vec<Disulfide>,
+    pub disulfide_range_nm: [f64; 2],
+    #[serde(default)]
+    pub coarse_grained: bool,
+    pub protein_selection: Option<String>,
+}
+impl ProteinInventory {
+    pub fn mark_duplicate_numbers(&mut self) {
+        let mut counts = std::collections::HashMap::new();
+        for residue in &self.residues {
+            *counts
+                .entry((residue.chain.clone(), residue.number))
+                .or_insert(0) += 1;
+        }
+        for residue in self.residues.iter_mut().chain(&mut self.ptms) {
+            residue.duplicate_number = counts
+                .get(&(residue.chain.clone(), residue.number))
+                .is_some_and(|&count| count > 1);
+        }
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Partition {
     pub id: String,
-    pub protein: Value,
+    pub protein: Option<ProteinInventory>,
     pub ligands: Vec<String>,
     #[serde(default)]
     pub ligand_details: Vec<serde_json::Value>,
@@ -285,5 +448,56 @@ impl Plan {
             return Err("Check the salt and solvent settings.".into());
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn glycan_checkout_keeps_previous_session_key_input() {
+        let protein = Protein {
+            ptms: vec![Ptm {
+                residue: 42,
+                modification: Modification::Glycosylation(Glycan::default()),
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_string(&protein).unwrap(),
+            r#"{"orient":false,"mutations":[],"ptms":[{"iupac":"GlcNAc","residue":42,"root_anomer":"b","type":"glycosylation"}],"ss_bonds":[]}"#
+        );
+    }
+
+    #[test]
+    fn protein_edits_keep_the_server_request_format() {
+        let mutation = Mutation {
+            residue: 12,
+            target: "SER".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(mutation).unwrap(),
+            json!({"residue":12,"target":"SER"})
+        );
+        for (modification, _) in Modification::choices() {
+            let mut expected = json!({"residue":12,"type":modification.key()});
+            match &modification {
+                Modification::Glycosylation(_) => {
+                    expected["iupac"] = json!("GlcNAc");
+                    expected["root_anomer"] = json!("b");
+                }
+                Modification::Phosphorylation { .. } => expected["charge"] = json!(-2),
+                _ => (),
+            }
+            let ptm = Ptm {
+                residue: 12,
+                modification,
+            };
+            assert_eq!(serde_json::to_value(&ptm).unwrap(), expected);
+            let parsed: Ptm = serde_json::from_value(expected).unwrap();
+            assert_eq!(parsed.modification, ptm.modification);
+        }
     }
 }

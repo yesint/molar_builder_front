@@ -35,7 +35,13 @@ async function components(page) {
     await input.fill('name C');
     await input.press('Enter');
     assert.equal(await panel.locator('li').count(), 1);
+    assert.equal(await panel.locator('li span').innerText(), 'mol 1');
+    const saved = panel.getByRole('textbox', {name: 'records.sdf, mol 1, saved ligand selection 1'});
+    await saved.fill('  name C  ');
+    await saved.press('Enter');
+    assert.equal(await saved.inputValue(), 'name C');
     await panel.locator('li button').click();
+    assert.equal(await input.evaluate(el => el === document.activeElement), true);
     await page.locator('#partition-system').click();
     await page.locator('#page-ligands').waitFor({state:'visible'});
     const filter = page.locator('#ligand-resname-search');
@@ -64,11 +70,32 @@ async function protein(page) {
         'ATOM      5  CB  THR A   1       1.910  -0.750   1.250  1.00  0.00           C',
         'ATOM      6  OG1 THR A   1       3.300  -0.750   1.250  1.00  0.00           O',
         'ATOM      7  CG2 THR A   1       1.190  -2.030   1.500  1.00  0.00           C',
+        'HETATM    8  O   HOH W   2       7.000   3.000   5.000  1.00  0.00           O',
+        'HETATM    9  H1  HOH W   2       7.957   3.000   5.000  1.00  0.00           H',
+        'HETATM   10  H2  HOH W   2       6.760   3.927   5.000  1.00  0.00           H',
+        'HETATM   11  O   HOH W   3      10.000   3.000   5.000  1.00  0.00           O',
+        'HETATM   12  H1  HOH W   3      10.957   3.000   5.000  1.00  0.00           H',
+        'HETATM   13  H2  HOH W   3       9.760   3.927   5.000  1.00  0.00           H',
         'END',
     ].join('\n');
     await page.locator('#structure-file').setInputFiles({name:'site.pdb',mimeType:'chemical/x-pdb',buffer:Buffer.from(structure)});
+    await page.locator('#ligand-residues-tab').click();
+    await page.locator('#load-ligands').getByLabel(/HOH, water/).check();
     await page.locator('#partition-system').click();
     await page.locator('#page-proteins:visible').waitFor();
+    await page.locator('#add-mutation').click();
+    await page.locator('#mutation-target').selectOption('LYS');
+    await page.locator('#mutation-form button[type=submit]').click();
+    await page.locator('#add-ptm').click();
+    await page.locator('#ptm-type').selectOption('lysine_myristoylation');
+    await page.locator('#ptm-add').click();
+    assert.match(await page.locator('#protein-ptms').innerText(), /LYS A:1, Lys myristoylation/);
+    await page.locator('#protein-mutations button').click();
+    assert.match(await page.locator('#protein-error').innerText(), /Remove the incompatible PTM/);
+    assert.match(await page.locator('#protein-mutations').innerText(), /→ LYS/);
+    await page.locator('#protein-ptms button').click();
+    await page.locator('#protein-mutations button').click();
+    assert.equal(await page.locator('#protein-mutations button').count(), 0);
     await page.locator('#add-mutation').click();
     await page.locator('#mutation-target').selectOption('SER');
     await page.locator('#mutation-form button[type=submit]').click();
@@ -88,11 +115,69 @@ async function protein(page) {
     await page.locator('#glycan-add').click();
     await page.waitForFunction(()=>document.querySelectorAll('#glycan-tree [data-node-index]').length===2);
     await page.locator('#glycan-apply').click();
-    assert.match(await page.locator('.glycan-item code').textContent(),/GlcNAc/);
+    const sequence = 'Man(b1-6)Man(b1-4)[Man(b1-6)]Ido(b1-3)[Man(b1-4)Man(b1-4)][Man(b1-3)Man(b1-6)]GlcNAc(b1-4)GlcNAc';
+    await page.locator('.glycan-item').getByText('Edit…').click();
+    await page.locator('#glycan-apply:enabled').waitFor();
+    await page.locator('#glycan-iupac').fill(sequence);
+    await page.waitForFunction(() => document.querySelectorAll('#glycan-tree [data-node-index]').length === 10);
+    await page.locator('#glycan-apply').click();
+    const row = page.locator('.glycan-item');
+    assert.equal(await row.locator('code').textContent(), sequence);
+    const viewport = page.viewportSize();
+    for (const width of [1280, 390]) {
+        await page.setViewportSize({width, height: 920});
+        assert.equal(await row.evaluate(el => {
+            const code = el.querySelector('code');
+            return getComputedStyle(code).textOverflow === 'ellipsis' &&
+                code.scrollWidth > code.clientWidth && code.scrollHeight === code.clientHeight &&
+                [...el.querySelectorAll('button')].every(b => b.getBoundingClientRect().right <= el.getBoundingClientRect().right + 1);
+        }), true);
+    }
+    await page.setViewportSize(viewport);
     await page.locator('#orient-protein').uncheck();
     await page.locator('#build-protein').click();
+    await page.locator('#page-ligands:visible').waitFor();
+    assert.equal(await page.locator('#ligand-viewer').isVisible(), false);
+    await page.locator('#parameterize-ligand').click();
     await page.locator('#page-membrane:visible').waitFor();
+    assert.match(await page.locator('#submit-summary').textContent(), /Parameterize ligands \(HOH ×2\)/);
     assert.equal(await page.locator('#protein-ready').isVisible(),true);
+}
+async function disulfides(page) {
+    await page.goto(base);
+    const records = [];
+    for (const [residue, offset] of [[1, 0], [2, 2.04]]) {
+        for (const [name, x, y] of [['N', -2.1, 2.2], ['CA', -1.3, 1.5],
+            ['C', -1.1, 2.9], ['O', -0.3, 3.5], ['CB', -0.5, 1], ['SG', 0, 0]]) {
+            const index = String(records.length + 1).padStart(5);
+            const xyz = [x + offset, y, 0].map(n => n.toFixed(3).padStart(8)).join('');
+            records.push(`ATOM  ${index}  ${name.padEnd(3)} CYS A${String(residue).padStart(4)}    ${xyz}  1.00  0.00           ${name[0]}`);
+        }
+    }
+    await page.locator('#structure-file').setInputFiles({
+        name: 'cystine.pdb', mimeType: 'chemical/x-pdb', buffer: Buffer.from(records.concat('END').join('\n')),
+    });
+    await page.locator('#partition-system').click();
+    const bond = page.locator('#protein-ss input');
+    assert.equal(await bond.isChecked(), true);
+    await bond.uncheck();
+    await page.locator('#add-ss').click();
+    const first = page.locator('#ss-first');
+    const second = page.locator('#ss-second');
+    await first.selectOption({index: 1});
+    await second.selectOption({index: 1});
+    await page.locator('#ss-form button[type=submit]').click();
+    assert.match(await page.locator('#ss-error').innerText(), /two different cysteines/);
+    await second.selectOption({index: 0});
+    await page.locator('#ss-form button[type=submit]').click();
+    assert.equal(await bond.isChecked(), true);
+    await bond.uncheck();
+    await page.locator('#add-ptm').click();
+    await page.locator('#ptm-type').selectOption('palmitoylation');
+    await page.locator('#ptm-add').click();
+    assert.equal(await bond.isDisabled(), true);
+    await page.locator('#protein-ptms button').click();
+    assert.equal(await bond.isEnabled(), true);
 }
 async function membrane(page) {
     await page.locator('#page-membrane:visible').waitFor();
@@ -151,6 +236,7 @@ async function solvent(page) {
         await protein(page);
         await membrane(page);
         await solvent(page);
+        await disulfides(page);
         assert.deepEqual(errors,[]);
         console.log('Passed Components, Protein, Ligands, Membrane and Solvent forms and their Submit summary.');
     } finally {await browser.close();}

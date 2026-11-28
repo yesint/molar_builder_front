@@ -9,6 +9,7 @@ async function checkout(context) {
     const errors = [];
     let buildRequests = 0;
     let paymentChecks = 0;
+    let paid = false;
     await context.route('**/api/health', route => route.fulfill(response({mode: 'sandbox', amount})));
     await context.route('**/api/checkout', route => route.fulfill(response({
         order_id: 'TESTORDER12345', amount,
@@ -18,11 +19,11 @@ async function checkout(context) {
         route.fulfill({contentType: 'text/html', body: '<title>Test approval</title>'}));
     await context.route('**/api/payment-status', route => {
         paymentChecks++;
-        return route.fulfill(response({paid: false}));
+        return route.fulfill(response({paid}));
     });
     await context.route('**/api/build', route => {
         buildRequests++;
-        return route.abort();
+        return route.fulfill({...response({error: 'Test build reached the server.'}), status: 422});
     });
 
     const page = await context.newPage();
@@ -60,13 +61,18 @@ async function checkout(context) {
     assert.match(await page.locator('#assembly-error').innerText(), /cancelled checkout/);
     assert.equal(buildRequests, 0);
     assert.ok(paymentChecks > 0);
+    paid = true;
+    await page.locator('#assemble-system:enabled').click();
+    await page.waitForFunction(() => document.querySelector('#assembly-error').textContent === 'Test build reached the server.');
+    assert.equal(await page.locator('#protein-error').textContent(), '');
+    assert.equal(buildRequests, 1);
     assert.deepEqual(errors, []);
 }
 (async () => {
     const browser = await chromium.launch({executablePath: process.env.CHROMIUM_EXECUTABLE});
     try {
         await checkout(await browser.newContext());
-        console.log('Passed navigation, stage help, checkout terms, sandbox pricing and PayPal cancellation.');
+        console.log('Passed navigation, stage help, checkout terms, sandbox pricing, PayPal cancellation and paid build handoff.');
     } finally {
         await browser.close();
     }

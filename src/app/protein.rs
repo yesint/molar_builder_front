@@ -1,19 +1,16 @@
 use super::*;
 use crate::viewer::{Layer, Preview};
-fn can_modify(protein: &Protein, residues: &[Value], id: u64, kind: &str) -> bool {
-    let Some(residue) = residues.iter().find(|r| r["id"] == id) else {
-        return false;
-    };
-    if residue["coarse_grained"] == true || protein.ptms.iter().any(|m| m["residue"] == id) {
+fn can_modify(protein: &Protein, residue: &Residue, kind: &Modification) -> bool {
+    let id = residue.id;
+    if residue.coarse_grained || protein.ptms.iter().any(|m| m.residue == id) {
         return false;
     }
     let name = protein
         .mutations
         .iter()
-        .find(|m| m["residue"] == id)
-        .and_then(|m| m["target"].as_str())
-        .or(residue["name"].as_str())
-        .unwrap_or("");
+        .find(|m| m.residue == id)
+        .map(|m| m.target.as_str())
+        .unwrap_or(&residue.name);
     let free_cysteine = name == "CYS"
         && !protein
             .ss_bonds
@@ -21,20 +18,21 @@ fn can_modify(protein: &Protein, residues: &[Value], id: u64, kind: &str) -> boo
             .flatten()
             .any(|&bond| bond as u64 == id);
     match kind {
-        "phosphorylation" => matches!(name, "SER" | "THR" | "TYR"),
-        "palmitoylation" | "farnesylation" | "geranylgeranylation" => free_cysteine,
-        "triacylation" => free_cysteine && residue["n_terminal"] == true,
-        "lysine_myristoylation" => name == "LYS",
-        "glycine_myristoylation" => name == "GLY" && residue["n_terminal"] == true,
-        "glycosylation" => matches!(name, "ASN" | "SER" | "THR"),
-        _ => false,
+        Modification::Phosphorylation { .. } => matches!(name, "SER" | "THR" | "TYR"),
+        Modification::Palmitoylation
+        | Modification::Farnesylation
+        | Modification::Geranylgeranylation => free_cysteine,
+        Modification::Triacylation => free_cysteine && residue.n_terminal,
+        Modification::LysineMyristoylation => name == "LYS",
+        Modification::GlycineMyristoylation => name == "GLY" && residue.n_terminal,
+        Modification::Glycosylation(_) => matches!(name, "ASN" | "SER" | "THR"),
     }
 }
-fn inventory(ui: Ui) -> Vec<Value> {
+fn inventory(ui: Ui) -> Vec<Residue> {
     ui.part.with(|p| {
         p.as_ref()
-            .and_then(|p| p.protein["residues"].as_array())
-            .cloned()
+            .and_then(|p| p.protein.as_ref())
+            .map(|p| p.residues.clone())
             .unwrap_or_default()
     })
 }
@@ -44,13 +42,12 @@ pub(super) fn details(ui: Ui, built: bool) -> Vec<Layer> {
     };
     let rows = inventory(ui);
     let settings = ui.plan.get().protein;
-    let mut ptms: Vec<_> = part.protein["ptms"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|r| r["id"].as_u64())
+    let mut ptms: Vec<_> = part
+        .protein
+        .iter()
+        .flat_map(|p| p.ptms.iter().map(|r| r.id))
         .collect();
-    ptms.extend(settings.ptms.iter().filter_map(|r| r["residue"].as_u64()));
+    ptms.extend(settings.ptms.iter().map(|r| r.residue));
     let bonds = settings
         .ss_bonds
         .into_iter()
@@ -62,14 +59,14 @@ pub(super) fn details(ui: Ui, built: bool) -> Vec<Layer> {
         .filter_map(|(role, ids)| {
             let values = rows
                 .iter()
-                .filter(|r| r["protein"] == true)
+                .filter(|r| r.protein)
                 .enumerate()
-                .filter(|(_, r)| r["id"].as_u64().is_some_and(|id| ids.contains(&id)))
-                .filter_map(|(i, r)| {
+                .filter(|(_, r)| ids.contains(&r.id))
+                .map(|(i, r)| {
                     if built {
-                        Some(i as u64)
+                        i as u64
                     } else {
-                        r["preview_index"].as_u64().or(r["id"].as_u64())
+                        r.preview_index.unwrap_or(r.id)
                     }
                 })
                 .map(|v| v.to_string())
@@ -90,10 +87,10 @@ pub(super) fn preview(ui: Ui) {
         ui.viewer.send(Action::Preview(Panel::Protein, vec![]));
         return;
     };
-    if p.protein.is_null() {
+    let Some(inventory) = &p.protein else {
         ui.viewer.send(Action::Preview(Panel::Protein, vec![]));
         return;
-    }
+    };
     let completed = ui
         .result
         .get()
@@ -103,12 +100,15 @@ pub(super) fn preview(ui: Ui) {
         .as_ref()
         .filter(|_| prepared.is_some())
         .map(|r| &r.geometry["prepared"])
-        .unwrap_or(&p.protein);
-    let main = report["protein_selection"].as_str().unwrap_or("all");
+        .unwrap_or(&Value::Null);
+    let main = report["protein_selection"]
+        .as_str()
+        .or(inventory.protein_selection.as_deref())
+        .unwrap_or("all");
     let mut layers = vec![Layer::new(
         "protein",
         main.into(),
-        if prepared.is_none() && p.protein["coarse_grained"] == true {
+        if prepared.is_none() && inventory.coarse_grained {
             "vdw"
         } else {
             "cartoon"
@@ -147,137 +147,183 @@ pub(super) fn preview(ui: Ui) {
     ui.viewer.send(Action::Preview(Panel::Protein, models));
 }
 pub(super) fn changed(ui: Ui) {
+    ui.error(Page::Protein).set(String::new());
     ui.set_done(Page::Protein, false);
-    ui.set_done(Page::Submit, false);
+    ui.invalidate_build();
 }
-fn filtered(ui: Ui, kind: &str, query: &str) -> Vec<(String, String)> {
+fn filtered(ui: Ui, kind: Option<&Modification>, query: &str) -> Vec<(String, String)> {
     let rows = inventory(ui);
     let p = ui.plan.get().protein;
     let q = query.to_lowercase();
     rows.iter()
-        .filter(|r| r["protein"] == true && r["coarse_grained"] != true)
-        .filter(|r| kind.is_empty() || can_modify(&p, &rows, r["id"].as_u64().unwrap(), kind))
+        .filter(|r| r.protein && !r.coarse_grained)
+        .filter(|r| kind.is_none_or(|k| can_modify(&p, r, k)))
         .filter_map(|r| {
             let mut display = r.clone();
-            if !kind.is_empty()
-                && let Some(mutation) = p.mutations.iter().find(|m| m["residue"] == r["id"])
+            if kind.is_some()
+                && let Some(mutation) = p.mutations.iter().find(|m| m.residue == r.id)
             {
-                display["name"] = mutation["target"].clone();
+                display.name.clone_from(&mutation.target);
             }
-            let label = components::residue_label(&display);
+            let label = display.label();
             let matches = q.split_whitespace().all(|term| {
-                if !kind.is_empty() && term.len() == 1 && term.as_bytes()[0].is_ascii_alphabetic() {
-                    r["chain"]
-                        .as_str()
-                        .is_some_and(|c| c.trim().eq_ignore_ascii_case(term))
+                if kind.is_some() && term.len() == 1 && term.as_bytes()[0].is_ascii_alphabetic() {
+                    r.chain.trim().eq_ignore_ascii_case(term)
                 } else {
                     label.to_lowercase().contains(term)
                 }
             });
-            matches.then(|| (r["id"].to_string(), label))
+            matches.then(|| (r.id.to_string(), label))
         })
         .collect()
 }
-fn modification_list(ui: Ui, editor: glycan::Editor, kind: &'static str) -> impl IntoView {
-    move || {
-        let p = ui.plan.get().protein;
-        let rows = inventory(ui);
-        let values = if kind == "ptms" { p.ptms } else { p.mutations };
-        let existing = ui
-            .part
-            .get()
-            .and_then(|p| p.protein["ptms"].as_array().cloned())
-            .unwrap_or_default();
-        view! {
-            {existing
-                .into_iter()
-                .filter(|_| kind == "ptms")
-                .map(|r| {
-                    view! { <div class="protein-item">{components::residue_label(&r)}</div> }
-                })
-                .collect_view()}
-            {values
-                .into_iter()
-                .enumerate()
-                .map(|(i, item)| {
-                    let site = item["residue"].as_u64().unwrap();
-                    let remove = move || {
-                        ui.plan
-                            .update(|p| {
-                                if kind == "ptms" {
-                                    p.protein.ptms.remove(i);
-                                } else {
-                                    p.protein.mutations.remove(i);
-                                }
-                            });
-                        changed(ui);
-                    };
-                    if item["type"] == "glycosylation" {
-                        return editor.row(site, item, remove).into_any();
-                    }
-                    let name = rows
-                        .iter()
-                        .find(|r| r["id"] == site)
-                        .map(components::residue_label)
-                        .unwrap_or_default();
-                    let label = if kind == "mutations" {
-                        format!("{name} → {}", item["target"].as_str().unwrap_or(""))
-                    } else if item["type"] == "phosphorylation" {
-                        format!("{name}, phosphate {}", item["charge"])
-                    } else {
-                        format!("{name}, {}", item["type"].as_str().unwrap_or("").replace('_', " "))
-                    };
-                    view! {
-                        <div class="protein-item">
-                            {label}
-                            <button
-                                class="remove-lipid"
-                                aria-label="Remove"
-                                on:click=move |_| remove()
-                            >
-                                "×"
-                            </button>
-                        </div>
-                    }
-                        .into_any()
-                })
-                .collect_view()}
-        }
+fn residue_name(rows: &[Residue], site: u64) -> String {
+    rows.iter()
+        .find(|r| r.id == site)
+        .map(Residue::label)
+        .unwrap_or_default()
+}
+fn removable_row(label: String, remove: impl Fn() + 'static) -> impl IntoView {
+    view! {
+        <div class="protein-item">
+            {label}<button class="remove-lipid" aria-label="Remove" on:click=move |_| remove()>
+                "×"
+            </button>
+        </div>
     }
 }
-fn bond_control(ui: Ui, rows: &[Value], b: Value) -> Option<impl IntoView + use<>> {
-    let pair: [usize; 2] = serde_json::from_value(b["residues"].clone()).ok()?;
+fn set_mutation(ui: Ui, site: u64, target: Option<String>) {
+    let residues = inventory(ui);
+    let Some(residue) = residues.iter().find(|r| r.id == site) else {
+        return;
+    };
+    let original = residue.name.as_str();
+    let next = target.as_deref().unwrap_or(original);
+    let mut protein = ui.plan.get_untracked().protein;
+    protein.mutations.retain(|m| m.residue != site);
+    if original != next {
+        protein.mutations.push(Mutation {
+            residue: site,
+            target: next.to_owned(),
+        });
+    }
+    if let Some(ptm) = protein.ptms.iter().position(|m| m.residue == site) {
+        let existing = protein.ptms.remove(ptm);
+        if !can_modify(&protein, residue, &existing.modification) {
+            ui.error(Page::Protein)
+                .set("Remove the incompatible PTM before changing this residue.".into());
+            return;
+        }
+        protein.ptms.insert(ptm, existing);
+    }
+    if next != "CYS"
+        && protein
+            .ss_bonds
+            .iter()
+            .flatten()
+            .any(|&id| id as u64 == site)
+    {
+        ui.error(Page::Protein)
+            .set("Disable the disulfide bond before changing this cysteine.".into());
+        return;
+    }
+    ui.plan.update(|p| p.protein = protein);
+    changed(ui);
+}
+fn mutation_list(ui: Ui) -> impl IntoView {
+    move || {
+        let rows = inventory(ui);
+        ui.plan.with(|plan| {
+            plan.protein
+                .mutations
+                .iter()
+                .map(|m| {
+                    let site = m.residue;
+                    removable_row(
+                        format!("{} → {}", residue_name(&rows, site), m.target),
+                        move || set_mutation(ui, site, None),
+                    )
+                })
+                .collect_view()
+        })
+    }
+}
+fn ptm_list(ui: Ui, editor: glycan::Editor) -> impl IntoView {
+    move || {
+        let rows = inventory(ui);
+        let existing = ui.part.with(|p| {
+            p.as_ref()
+                .and_then(|p| p.protein.as_ref().map(|p| &p.ptms))
+                .into_iter()
+                .flatten()
+                .map(|r| view! { <div class="protein-item">{r.label()}</div> })
+                .collect_view()
+        });
+        let added = ui.plan.with(|plan| {
+            plan.protein
+                .ptms
+                .iter()
+                .map(|ptm| {
+                    let site = ptm.residue;
+                    let remove = move || {
+                        ui.plan
+                            .update(|p| p.protein.ptms.retain(|m| m.residue != site));
+                        changed(ui);
+                    };
+                    let description = match &ptm.modification {
+                        Modification::Glycosylation(glycan) => {
+                            return editor.row(site, glycan, remove).into_any();
+                        }
+                        Modification::Phosphorylation { charge } => format!("phosphate {charge}"),
+                        other => other.label().to_owned(),
+                    };
+                    removable_row(
+                        {
+                            let name = rows
+                                .iter()
+                                .find(|r| r.id == site)
+                                .map(|r| {
+                                    let mut r = r.clone();
+                                    if let Some(m) =
+                                        plan.protein.mutations.iter().find(|m| m.residue == site)
+                                    {
+                                        r.name.clone_from(&m.target);
+                                    }
+                                    r.label()
+                                })
+                                .unwrap_or_default();
+                            format!("{name}, {description}")
+                        },
+                        remove,
+                    )
+                    .into_any()
+                })
+                .collect_view()
+        });
+        (existing, added)
+    }
+}
+fn bond_control(ui: Ui, rows: &[Residue], b: Disulfide) -> impl IntoView + use<> {
+    let pair = b.residues;
     let names = pair.map(|id| {
         rows.iter()
-            .find(|r| r["id"] == id)
-            .map(components::residue_label)
+            .find(|r| r.id == id as u64)
+            .map(Residue::label)
             .unwrap_or_default()
     });
-    Some(view! {
+    let lipidated = move || {
+        ui.plan.with(|p| {
+            p.protein.ptms.iter().any(|m| {
+                pair.contains(&(m.residue as usize)) && m.modification.uses_cysteine_sulfur()
+            })
+        })
+    };
+    view! {
         <label class="protein-check">
             <input
                 type="checkbox"
                 prop:checked=move || ui.plan.with(|p| p.protein.ss_bonds.contains(&pair))
-                disabled=move || {
-                    ui.plan
-                        .with(|p| {
-                            p.protein
-                                .ptms
-                                .iter()
-                                .any(|m| {
-                                    m["residue"]
-                                        .as_u64()
-                                        .is_some_and(|n| pair.contains(&(n as usize)))
-                                        && matches!(
-                                            m["type"].as_str(),
-                                            Some(
-                                                "palmitoylation" | "farnesylation" | "geranylgeranylation"
-                                                | "triacylation",
-                                            )
-                                        )
-                                })
-                        })
-                }
+                disabled=lipidated
                 on:change=move |e| {
                     ui.plan
                         .update(|p| {
@@ -289,14 +335,9 @@ fn bond_control(ui: Ui, rows: &[Value], b: Value) -> Option<impl IntoView + use<
                     changed(ui);
                 }
             />
-            {format!(
-                "{} – {} {:.3} nm",
-                names[0],
-                names[1],
-                b["distance_nm"].as_f64().unwrap_or_default(),
-            )}
+            {format!("{} – {} {:.3} nm", names[0], names[1], b.distance_nm.unwrap_or_default())}
         </label>
-    })
+    }
 }
 fn cysteines(ui: Ui) -> Vec<(String, String)> {
     let p = ui.plan.get().protein;
@@ -306,12 +347,12 @@ fn cysteines(ui: Ui) -> Vec<(String, String)> {
             let target = p
                 .mutations
                 .iter()
-                .find(|m| m["residue"] == r["id"])
-                .and_then(|m| m["target"].as_str())
-                .or(r["name"].as_str());
-            target == Some("CYS") && !p.ptms.iter().any(|m| m["residue"] == r["id"])
+                .find(|m| m.residue == r.id)
+                .map(|m| m.target.as_str())
+                .unwrap_or(&r.name);
+            target == "CYS" && !p.ptms.iter().any(|m| m.residue == r.id)
         })
-        .map(|r| (r["id"].to_string(), components::residue_label(&r)))
+        .map(|r| (r.id.to_string(), r.label()))
         .collect()
 }
 
@@ -364,43 +405,14 @@ fn selected_site(rows: &[(String, String)], selected: Option<u64>) -> Option<u64
 fn MutationPicker(ui: Ui, modal: Modal, query: RwSignal<String>) -> impl IntoView {
     let target = RwSignal::new("ALA".to_string());
     let selected = RwSignal::new(None::<u64>);
-    let sites = move || filtered(ui, "", &query.get());
+    let sites = move || filtered(ui, None, &query.get());
     let submit = move |e: leptos::ev::SubmitEvent| {
         e.prevent_default();
         let Some(site) = selected_site(&sites(), selected.get_untracked()) else {
             return;
         };
-        let next = target.get_untracked();
-        let Some(r) = inventory(ui).into_iter().find(|r| r["id"] == site) else {
-            return;
-        };
-        let mut p = ui.plan.get_untracked().protein;
-        p.mutations.retain(|m| m["residue"] != site);
-        if r["name"] != next {
-            p.mutations.push(json!({"residue":site,"target":next}));
-        }
         modal.close();
-        if next != "CYS" && p.ss_bonds.iter().flatten().any(|&id| id as u64 == site) {
-            ui.msg
-                .set("Disable the disulfide bond before changing this cysteine.".into());
-            return;
-        }
-        if let Some(modification) = p.ptms.iter().find(|m| m["residue"] == site).cloned() {
-            let mut test = p.clone();
-            test.ptms.retain(|m| m["residue"] != site);
-            if !can_modify(
-                &test,
-                &inventory(ui),
-                site,
-                modification["type"].as_str().unwrap_or(""),
-            ) {
-                ui.msg
-                    .set("Remove the incompatible PTM before changing this residue.".into());
-                return;
-            }
-        }
-        ui.plan.update(|plan| plan.protein = p);
-        changed(ui);
+        set_mutation(ui, site, Some(target.get_untracked()));
     };
     view! {
         <dialog id="mutation-picker" node_ref=modal.0>
@@ -412,7 +424,10 @@ fn MutationPicker(ui: Ui, modal: Modal, query: RwSignal<String>) -> impl IntoVie
                         id="mutation-search"
                         type="search"
                         prop:value=move || query.get()
-                        on:input=move |e| query.set(event_target_value(&e))
+                        on:input=move |e| {
+                            query.set(event_target_value(&e));
+                            selected.set(None);
+                        }
                     />
                 </label>
                 <label>
@@ -424,8 +439,21 @@ fn MutationPicker(ui: Ui, modal: Modal, query: RwSignal<String>) -> impl IntoVie
                         {move || {
                             sites()
                                 .into_iter()
-                                .map(|(value, label)| {
-                                    view! { <option value=value>{label}</option> }
+                                .enumerate()
+                                .map(|(index, (value, label))| {
+                                    {
+                                        let id = value.parse::<u64>().ok();
+                                        view! {
+                                            <option
+                                                value=value
+                                                prop:selected=move || {
+                                                    selected.get().map_or(index == 0, |n| Some(n) == id)
+                                                }
+                                            >
+                                                {label}
+                                            </option>
+                                        }
+                                    }
                                 })
                                 .collect_view()
                         }}
@@ -454,46 +482,32 @@ fn MutationPicker(ui: Ui, modal: Modal, query: RwSignal<String>) -> impl IntoVie
     }
 }
 
-const PTM_TYPES: &[(&str, &str)] = &[
-    ("phosphorylation", "Phosphorylation"),
-    ("palmitoylation", "Lipidation: Cys S-palmitoylation"),
-    (
-        "glycine_myristoylation",
-        "Lipidation: N-terminal Gly myristoylation",
-    ),
-    ("lysine_myristoylation", "Lipidation: Lys myristoylation"),
-    ("farnesylation", "Lipidation: Cys farnesylation"),
-    ("geranylgeranylation", "Lipidation: Cys geranylgeranylation"),
-    ("triacylation", "Lipidation: N-terminal Cys triacylation"),
-    ("glycosylation", "Glycosilation"),
-];
-
 #[component]
 fn PtmPicker(
     ui: Ui,
     modal: Modal,
     query: RwSignal<String>,
-    kind: RwSignal<String>,
+    kind: RwSignal<Modification>,
 ) -> impl IntoView {
     let selected = RwSignal::new(None::<u64>);
     let charge = RwSignal::new(-2i32);
-    let sites = move || filtered(ui, &kind.get(), &query.get());
-    let not_phosphate = move || kind.get() != "phosphorylation";
+    let sites = move || filtered(ui, Some(&kind.get()), &query.get());
+    let not_phosphate = move || !kind.with(|m| matches!(m, Modification::Phosphorylation { .. }));
     let submit = move |e: leptos::ev::SubmitEvent| {
         e.prevent_default();
         let Some(site) = selected_site(&sites(), selected.get_untracked()) else {
             return;
         };
-        let kind = kind.get_untracked();
-        let mut m = json!({"type":kind,"residue":site});
-        if kind == "glycosylation" {
-            m["iupac"] = json!("GlcNAc");
-            m["root_anomer"] = json!("b");
+        let mut modification = kind.get_untracked();
+        if let Modification::Phosphorylation { charge: value } = &mut modification {
+            *value = charge.get_untracked();
         }
-        if kind == "phosphorylation" {
-            m["charge"] = json!(charge.get_untracked());
-        }
-        ui.plan.update(|p| p.protein.ptms.push(m));
+        ui.plan.update(|p| {
+            p.protein.ptms.push(Ptm {
+                residue: site,
+                modification,
+            })
+        });
         changed(ui);
         modal.close();
     };
@@ -506,18 +520,27 @@ fn PtmPicker(
                     id="ptm-type"
                     required
                     on:change=move |e| {
-                        kind.set(event_target_value(&e));
+                        let key = event_target_value(&e);
+                        if let Some((m, _)) = Modification::choices()
+                            .into_iter()
+                            .find(|(m, _)| m.key() == key)
+                        {
+                            kind.set(m);
+                        }
                         selected.set(None);
                     }
                 >
-                    {PTM_TYPES
-                        .iter()
-                        .map(|&(value, label)| {
+                    {Modification::choices()
+                        .into_iter()
+                        .map(|(modification, label)| {
+                            let value = modification.key();
                             view! {
                                 <option
                                     value=value
-                                    prop:selected=move || kind.get() == value
-                                    disabled=move || filtered(ui, value, "").is_empty()
+                                    prop:selected=move || kind.with(|m| m.key() == value)
+                                    disabled=move || {
+                                        filtered(ui, Some(&modification), "").is_empty()
+                                    }
                                 >
                                     {label}
                                 </option>
@@ -531,7 +554,10 @@ fn PtmPicker(
                     type="search"
                     placeholder="Residue number, chain or name"
                     prop:value=move || query.get()
-                    on:input=move |e| query.set(event_target_value(&e))
+                    on:input=move |e| {
+                        query.set(event_target_value(&e));
+                        selected.set(None);
+                    }
                 />
                 <label for="ptm-residue">"Residue"</label>
                 <select
@@ -542,7 +568,20 @@ fn PtmPicker(
                     {move || {
                         sites()
                             .into_iter()
-                            .map(|(value, label)| view! { <option value=value>{label}</option> })
+                            .enumerate()
+                            .map(|(index, (value, label))| {
+                                let id = value.parse::<u64>().ok();
+                                view! {
+                                    <option
+                                        value=value
+                                        prop:selected=move || {
+                                            selected.get().map_or(index == 0, |n| Some(n) == id)
+                                        }
+                                    >
+                                        {label}
+                                    </option>
+                                }
+                            })
                             .collect_view()
                     }}
                 </select>
@@ -604,20 +643,19 @@ fn DisulfidePicker(
             error.set("Choose two different cysteines that are not already linked.".into());
             return;
         }
-        let found = part.protein["ss_bonds"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|bond| bond["residues"] == json!(pair) || bond["residues"] == json!([b, a]));
-        if !found {
-            let range = &part.protein["disulfide_range_nm"];
-            error.set(format!(
-                "The SG–SG distance must be {:.2}–{:.2} nm.",
-                range[0].as_f64().unwrap_or_default(),
-                range[1].as_f64().unwrap_or_default()
-            ));
+        let Some(inventory) = part.protein else {
             return;
-        }
+        };
+        let candidate = inventory
+            .ss_bonds
+            .iter()
+            .map(|b| b.residues)
+            .find(|&ids| ids == pair || ids == [b as usize, a as usize]);
+        let Some(pair) = candidate else {
+            let [min, max] = inventory.disulfide_range_nm;
+            error.set(format!("The SG–SG distance must be {min:.2}–{max:.2} nm."));
+            return;
+        };
         ui.plan.update(|p| p.protein.ss_bonds.push(pair));
         modal.close();
         changed(ui);
@@ -693,16 +731,16 @@ pub(super) fn ProteinPage(ui: Ui) -> impl IntoView {
     let editor = glycan::Editor::new(ui);
     let mutation_query = RwSignal::new(String::new());
     let ptm_query = RwSignal::new(String::new());
-    let kind = RwSignal::new("phosphorylation".to_owned());
+    let kind = RwSignal::new(Modification::Phosphorylation { charge: -2 });
     let first = RwSignal::new(None);
     let second = RwSignal::new(None);
     let error = RwSignal::new(String::new());
     let inactive = move || !ui.has_protein() || ui.busy.get();
     let first_kind = move || {
-        PTM_TYPES
-            .iter()
-            .map(|&(key, _)| key)
-            .find(|k| !filtered(ui, k, "").is_empty())
+        Modification::choices()
+            .into_iter()
+            .map(|(m, _)| m)
+            .find(|m| !filtered(ui, Some(m), "").is_empty())
     };
     view! {
         <StageHeading ui page=Page::Protein />
@@ -719,10 +757,10 @@ pub(super) fn ProteinPage(ui: Ui) -> impl IntoView {
                                 disabled=move || first_kind().is_none()
                                 on:click=move |_| {
                                     ptm_query.set(String::new());
-                                    if filtered(ui, &kind.get_untracked(), "").is_empty()
+                                    if filtered(ui, Some(&kind.get_untracked()), "").is_empty()
                                         && let Some(k) = first_kind()
                                     {
-                                        kind.set(k.into());
+                                        kind.set(k);
                                     }
                                     ptm.open();
                                 }
@@ -730,7 +768,7 @@ pub(super) fn ProteinPage(ui: Ui) -> impl IntoView {
                                 "Add..."
                             </button>
                         </div>
-                        <div id="protein-ptms">{modification_list(ui, editor, "ptms")}</div>
+                        <div id="protein-ptms">{ptm_list(ui, editor)}</div>
                     </div>
                     <div class="protein-section">
                         <div class="protein-section-heading">
@@ -747,9 +785,7 @@ pub(super) fn ProteinPage(ui: Ui) -> impl IntoView {
                                 "Add..."
                             </button>
                         </div>
-                        <div id="protein-mutations">
-                            {modification_list(ui, editor, "mutations")}
-                        </div>
+                        <div id="protein-mutations">{mutation_list(ui)}</div>
                     </div>
                     <div class="protein-section">
                         <div class="protein-section-heading">
@@ -775,10 +811,10 @@ pub(super) fn ProteinPage(ui: Ui) -> impl IntoView {
                                 let rows = inventory(ui);
                                 ui.part
                                     .get()
-                                    .and_then(|p| p.protein["ss_bonds"].as_array().cloned())
+                                    .and_then(|p| p.protein.map(|p| p.ss_bonds))
                                     .unwrap_or_default()
                                     .into_iter()
-                                    .filter_map(|v| bond_control(ui, &rows, v))
+                                    .map(|v| bond_control(ui, &rows, v))
                                     .collect_view()
                             }}
                         </div>
@@ -827,9 +863,9 @@ pub(super) fn ProteinPage(ui: Ui) -> impl IntoView {
                     id="protein-error"
                     class="error"
                     role="alert"
-                    hidden=move || ui.msg.with(String::is_empty)
+                    hidden=move || ui.error(Page::Protein).with(String::is_empty)
                 >
-                    {move || ui.msg.get()}
+                    {move || ui.error(Page::Protein).get()}
                 </p>
             </div>
             <ViewerSurface ui panel=Panel::Protein />

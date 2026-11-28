@@ -52,4 +52,4 @@ The browser regression test submits a solvated POPC membrane and a dry methane m
 
 Set `WEBGPU=1` to run the browser checks with WebGPU. The test reads the rendered frame before and after a ligand visibility change, checks that selecting the ligands restores the image, and records GPU validation errors.
 
-Run `node tests/forms.cjs` to exercise the controls across all six pages. Run `node tests/checkout.cjs` to check stage help, checkout pricing, and PayPal cancellation with simulated payment endpoints. Run the browser suites one at a time when they share a local backend because the server limits concurrent operations.
+Run `node tests/forms.cjs` to exercise the controls across all six pages. Run `node tests/checkout.cjs` to check stage help, checkout pricing, cancellation, and submission after payment confirmation with simulated PayPal endpoints. Run the browser suites one at a time when they share a local backend because the server limits concurrent operations.
